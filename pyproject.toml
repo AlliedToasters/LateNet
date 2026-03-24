@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "latenet"
 version = "0.1.0"
-description = "Large-scale contrastive true/false statement pairs from WordNet for probing truth representations in LLMs"
+description = "Large-scale contrastive true/false statement pairs for probing truth representations in LLMs"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [{name = "Michael Klear"}]
@@ -30,6 +30,7 @@ dev = [
 latenet-generate = "scripts.generate:main"
 latenet-validate = "scripts.validate:main"
 latenet-export = "scripts.export:main"
+latenet-stats = "scripts.stats:main"
 
 [project.urls]
 Repository = "https://github.com/AlliedToasters/LateNet"

@@ -8,34 +8,57 @@ Exported as Parquet. Each row represents a single statement.
 | `statement` | str | Natural language statement |
 | `label` | bool | True or false |
 | `pair_id` | str | Links true/false counterparts |
-| `domain` | str | WordNet top-level category (animal, plant, artifact, etc.) |
-| `relationship_type` | str | hypernym, meronym, antonym, etc. |
+| `domain` | str | Semantic domain (animal, geography, chemistry, etc.) |
+| `relation_type` | str | Logical relation (hypernymy, contained-in, greater-than, etc.) |
 | `difficulty` | str | hard, medium, easy |
-| `semantic_distance` | int | Hops in WordNet tree between true and swapped concept |
-| `source_synset` | str | WordNet synset ID for the subject |
-| `target_synset` | str | WordNet synset ID for the object (true version) |
-| `neg_synset` | str \| null | WordNet synset ID for the swapped object (false version) |
+| `tier` | int | Distribution shift tier (1=in-distribution, 2=adjacent, 3=OOD) |
+| `semantic_distance` | int \| null | Hops in hierarchy (where applicable) |
+| `source_synset` | str \| null | WordNet synset ID for the subject (WordNet pairs only) |
+| `target_synset` | str \| null | WordNet synset ID for the object (WordNet pairs only) |
+| `neg_synset` | str \| null | WordNet synset ID for the swapped object (WordNet pairs only) |
+| `generator` | str | Which generator produced this pair (wordnet, geography, temporal, etc.) |
 | `template_id` | str | Which template was used |
+| `negation_strategy` | str | sibling_swap, distant_swap, direct_negation, reverse_relation |
 | `vote_llama405b` | bool \| null | Per-model vote |
 | `vote_sonnet` | bool \| null | Per-model vote |
 | `vote_opus` | bool \| null | Per-model vote (only if escalated) |
 | `consensus` | str | agreed, disputed, escalated |
-| `source` | str | "wordnet" or "augmentation" |
 
-## Difficulty Tiers
+## Difficulty Tiers (semantic distance)
 
 | Tier | Strategy | Semantic Distance |
 |------|----------|-------------------|
 | **Hard** | Sibling swap (same parent) | 2 hops |
-| **Medium** | Cousin swap (same grandparent) | 4 hops |
+| **Medium** | Cousin swap (same grandparent) | 3-5 hops |
 | **Easy** | Distant subtree swap | 6+ hops |
+
+## Distribution Shift Tiers
+
+| Tier | Description |
+|------|-------------|
+| **1** | In-distribution: same templates, same relation types, held-out entities |
+| **2** | Distribution-adjacent: same logical relation, different domain |
+| **3** | Out-of-distribution: entirely new relation types not seen in training |
 
 ## Negation Strategies
 
-1. **Sibling swap** - replace the object with a sibling in the WordNet tree
-2. **Distant swap** - replace with a node from a different subtree
-3. **Direct negation** - syntactic negation of a true statement
-4. **Reverse relation** - flip the relation where it becomes false
+1. **Sibling swap** — replace the object with a semantically close alternative
+2. **Distant swap** — replace with a semantically distant alternative
+3. **Direct negation** — syntactic negation of a true statement
+4. **Reverse relation** — flip the relation where it becomes false
+
+## Generators
+
+| Generator | Data Source | Relation Types |
+|-----------|------------|----------------|
+| `wordnet` | NLTK WordNet | hypernymy, meronymy, antonymy, sibling |
+| `geography` | Natural Earth, GeoNames | contained-in, north-of, closer-to |
+| `temporal` | Historical databases | before, after, century-of |
+| `chemistry` | Periodic table, PubChem | symbol-of, property-of, group-membership |
+| `language` | Translation dictionaries | translates-to |
+| `magnitude` | World Bank, reference tables | greater-than, less-than |
+| `authorship` | Literary/scientific databases | written-by, proposed-by |
+| `biology` | NCBI taxonomy | is-a, part-of |
 
 ## Validation Pipeline
 
