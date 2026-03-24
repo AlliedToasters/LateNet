@@ -8,10 +8,12 @@ import pandas as pd
 
 from latenet.generators.base import BaseGenerator
 from latenet.generators.wordnet_gen import WordNetGenerator
+from latenet.generators.geography import GeographyGenerator
 
 # Registry of all available generators
 GENERATORS: dict[str, type[BaseGenerator]] = {
     "wordnet": WordNetGenerator,
+    "geography": GeographyGenerator,
 }
 
 
