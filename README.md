@@ -36,76 +36,9 @@ latenet-export --input validated.parquet --output latenet_v1.parquet
 
 ## How It Works
 
-### Contrastive Pair Generation
+LateNet walks WordNet's noun hierarchy. For each concept (synset), it generates **true** statements from real relationships (hypernymy, meronymy, antonymy) and **false** statements by swapping related concepts at controlled semantic distances — from hard (sibling swap) to easy (distant subtree swap). Statements use varied templates to prevent probes from shortcutting on surface phrasing.
 
-LateNet walks WordNet's noun hierarchy. For each concept (synset), it generates **true** statements from real relationships and **false** statements by perturbing those relationships at controlled semantic distances.
-
-**Relationship types:**
-- **Hypernymy** ("is-a"): "A dog is a mammal" / false: "A dog is a reptile"
-- **Meronymy** ("part-of"): "A wheel is part of a car" / false: "A wheel is part of a tree"
-- **Antonymy**: adjective-based contrastive pairs
-- **Properties/attributes** where available
-
-### Difficulty Tiers
-
-False statements are generated at controlled semantic distances from the true concept:
-
-| Tier | Strategy | Example |
-|------|----------|---------|
-| **Hard** | Sibling swap (same parent) | "A dog is a cat" |
-| **Medium** | Cousin swap (same grandparent) | "A dog is a lizard" |
-| **Easy** | Distant subtree swap | "A dog is an airplane" |
-
-### Negation Strategies
-
-Each true statement can produce multiple false counterparts:
-
-1. **Sibling swap** - replace the object with a sibling in the WordNet tree
-2. **Distant swap** - replace with a node from a different subtree
-3. **Direct negation** - syntactic negation of a true statement ("A dog is not a mammal")
-4. **Reverse relation** - flip the relation where it becomes false ("A mammal is a dog")
-
-### Template Diversity
-
-Statements use varied templates to prevent probes from shortcutting on surface phrasing:
-
-- "{entity} is a {category}"
-- "A {entity} is a type of {category}"
-- "{part} is part of {whole}"
-- "{entity} belongs to the category of {category}"
-
-### LLM Validation Pipeline
-
-Generated pairs are validated by an ensemble of LLMs to catch polysemy issues, pragmatically weird statements, and edge cases:
-
-- **Voters:** Llama 405B Instruct, Claude Sonnet
-- **Escalation:** On disagreement, escalate to Claude Opus as tiebreaker
-- **Output:** Each row gets a `consensus` column and per-model votes
-- **Filtering:** Disputed pairs can be kept with low confidence weight or dropped
-
-### Output Schema
-
-Exported as Parquet. Each row contains:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | str | Unique identifier |
-| `statement` | str | Natural language statement |
-| `label` | bool | True or false |
-| `pair_id` | str | Links true/false counterparts |
-| `domain` | str | WordNet top-level category |
-| `relationship_type` | str | hypernym, meronym, antonym, etc. |
-| `difficulty` | str | hard, medium, easy |
-| `semantic_distance` | int | Hops in WordNet tree between true and swapped concept |
-| `source_synset` | str | WordNet synset ID for the subject |
-| `target_synset` | str | WordNet synset ID for the object (true version) |
-| `neg_synset` | str \| null | WordNet synset ID for the swapped object |
-| `template_id` | str | Which template was used |
-| `vote_llama405b` | bool \| null | Per-model vote |
-| `vote_sonnet` | bool \| null | Per-model vote |
-| `vote_opus` | bool \| null | Per-model vote (only if escalated) |
-| `consensus` | str | agreed, disputed, escalated |
-| `source` | str | "wordnet" or "augmentation" |
+Generated pairs are then validated by an LLM ensemble (with escalation on disagreement) and exported as labeled Parquet files.
 
 ## Project Structure
 
