@@ -1,6 +1,6 @@
 # LateNet
 
-A large-scale dataset of contrastive true/false statement pairs for probing truth representations in LLM activations. Think "ImageNet for interpretability."
+A large-scale dataset of contrastive true/false statement pairs for probing truth representations in LLM activations.
 
 LateNet draws its taxonomic structure from [WordNet](https://wordnet.princeton.edu/), mirroring how ImageNet used WordNet synsets for its category hierarchy. The output is a validated dataset of labeled true/false statement pairs ready for activation extraction.
 
