@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "latenet"
+version = "0.1.0"
+description = "Large-scale contrastive true/false statement pairs from WordNet for probing truth representations in LLMs"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Michael Klear"}]
+requires-python = ">=3.10"
+dependencies = [
+    "nltk>=3.8",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+]
+
+[project.optional-dependencies]
+validation = [
+    "anthropic>=0.30",
+    "openai>=1.0",
+]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+latenet-generate = "scripts.generate:main"
+latenet-validate = "scripts.validate:main"
+latenet-export = "scripts.export:main"
+
+[project.urls]
+Repository = "https://github.com/AlliedToasters/LateNet"
+
+[tool.setuptools.packages.find]
+include = ["latenet*", "scripts*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

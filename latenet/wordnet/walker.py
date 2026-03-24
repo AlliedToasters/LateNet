@@ -1,0 +1,1 @@
+"""WordNet hierarchy traversal."""
