@@ -130,6 +130,14 @@ latenet/
 - **Cheap generation, expensive validation** - generation uses WordNet locally; validation requires API calls and runs as a batch job
 - **Target:** 200K+ validated pairs across 50+ domains
 
+## Acknowledgments
+
+LateNet is directly inspired by [The Geometry of Truth](https://arxiv.org/abs/2310.06824) (Marks & Tegmark, 2023), which demonstrated that LLMs represent truth as a linear feature in activation space using small, hand-crafted datasets of true/false statements. LateNet aims to scale that approach by orders of magnitude.
+
+> Samuel Marks and Max Tegmark. "The Geometry of Truth: Emergent Linear Structure in Large Language Model Representations of True/False Statements." *arXiv preprint arXiv:2310.06824*, 2023.
+
+The taxonomic backbone comes from [WordNet](https://wordnet.princeton.edu/) (Miller, 1995), and the name "LateNet" nods to [ImageNet](https://www.image-net.org/) (Deng et al., 2009), which similarly used WordNet's synset hierarchy to organize a large-scale dataset that transformed its field.
+
 ## License
 
 MIT - see [LICENSE](LICENSE).
