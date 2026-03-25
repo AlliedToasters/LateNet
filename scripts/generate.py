@@ -10,12 +10,14 @@ from latenet.generators.base import BaseGenerator
 from latenet.generators.wordnet_gen import WordNetGenerator
 from latenet.generators.geography import GeographyGenerator
 from latenet.generators.chemistry import ChemistryGenerator
+from latenet.generators.biology import BiologyGenerator
 
 # Registry of all available generators
 GENERATORS: dict[str, type[BaseGenerator]] = {
     "wordnet": WordNetGenerator,
     "geography": GeographyGenerator,
     "chemistry": ChemistryGenerator,
+    "biology": BiologyGenerator,
 }
 
 
