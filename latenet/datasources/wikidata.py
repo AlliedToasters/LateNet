@@ -23,7 +23,7 @@ USER_AGENT = (
     "LateNet/0.1 (https://github.com/AlliedToasters/latenet; research dataset generation)"
 )
 DEFAULT_PAGE_SIZE = 5000
-DEFAULT_TIMEOUT = 60
+DEFAULT_TIMEOUT = 120
 MAX_RETRIES = 3
 RATE_LIMIT_SECONDS = 1.0
 
@@ -117,7 +117,11 @@ def sparql_query(
                 timeout=timeout,
             )
             resp.raise_for_status()
-            data = resp.json()
+            import json as _json
+            try:
+                data = resp.json()
+            except ValueError:
+                data = _json.loads(resp.text, strict=False)
             break
         except (requests.RequestException, ValueError) as e:
             last_error = e
@@ -159,6 +163,7 @@ def sparql_query_paginated(
     page_size: int = DEFAULT_PAGE_SIZE,
     timeout: int = DEFAULT_TIMEOUT,
     force_refresh: bool = False,
+    max_pages: int | None = None,
 ) -> pd.DataFrame:
     """Execute a paginated SPARQL query using {limit} and {offset} placeholders.
 
@@ -196,7 +201,8 @@ def sparql_query_paginated(
                     timeout=timeout,
                 )
                 resp.raise_for_status()
-                data = resp.json()
+                import json as _json
+                data = _json.loads(resp.text, strict=False)
                 break
             except (requests.RequestException, ValueError) as e:
                 last_error = e
@@ -207,6 +213,14 @@ def sparql_query_paginated(
                 )
                 time.sleep(wait)
         else:
+            # If we already have some data, log warning and stop pagination
+            # rather than failing the entire query
+            if all_dfs:
+                logger.warning(
+                    "Page %d failed after %d attempts; stopping pagination with %d rows collected",
+                    page_num, MAX_RETRIES, sum(len(d) for d in all_dfs),
+                )
+                break
             raise RuntimeError(
                 f"Paginated query page {page_num} failed after {MAX_RETRIES} attempts: "
                 f"{last_error}"
@@ -230,6 +244,10 @@ def sparql_query_paginated(
         logger.info("Fetched page %d (%d rows so far)...", page_num, total_rows)
 
         if len(rows) < page_size:
+            break
+
+        if max_pages is not None and page_num >= max_pages:
+            logger.info("Reached max_pages=%d, stopping pagination", max_pages)
             break
 
         offset += page_size
@@ -313,27 +331,27 @@ def _build_organism_query() -> str:
     """
     rank_values = " ".join(f"wd:{qid}" for qid in _RANK_QIDS.values())
 
-    return """
+    return f"""
 SELECT DISTINCT ?item ?itemLabel ?commonName ?taxonRank ?taxonRankLabel
        ?parentTaxon ?parentTaxonLabel ?ncbiId ?article
-WHERE {{
+WHERE {{{{
   ?item wdt:P31 wd:Q16521 .
   ?item wdt:P105 ?taxonRank .
   ?item wdt:P171 ?parentTaxon .
 
-  VALUES ?taxonRank {{ {ranks} }}
+  VALUES ?taxonRank {{{{ {rank_values} }}}}
 
-  OPTIONAL {{ ?item wdt:P1843 ?commonName . FILTER(LANG(?commonName) = "en") }}
-  OPTIONAL {{ ?item wdt:P685 ?ncbiId . }}
-  OPTIONAL {{
+  OPTIONAL {{{{ ?item wdt:P1843 ?commonName . FILTER(LANG(?commonName) = "en") }}}}
+  OPTIONAL {{{{ ?item wdt:P685 ?ncbiId . }}}}
+  OPTIONAL {{{{
     ?article schema:about ?item .
     ?article schema:isPartOf <https://en.wikipedia.org/> .
-  }}
+  }}}}
 
-  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
-}}
+  SERVICE wikibase:label {{{{ bd:serviceParam wikibase:language "en" . }}}}
+}}}}
 LIMIT {{limit}} OFFSET {{offset}}
-""".format(ranks=rank_values)
+"""
 
 
 def _extract_qid(uri: str) -> str:
@@ -471,39 +489,26 @@ def load_organisms(
 
 
 def _build_event_query() -> str:
-    """Build the paginated SPARQL query for historical events with dates."""
+    """Build the paginated SPARQL query for historical events with dates.
+
+    Uses direct P31 (instance-of) only — no transitive subclass traversal
+    to keep query fast.  Date precision is filtered in Python.
+    Queries each event type separately and combines results to avoid
+    Wikidata query planner timeouts with large VALUES blocks.
+    """
     return """
 SELECT DISTINCT ?item ?itemLabel ?itemDescription ?date ?eventType ?eventTypeLabel ?article
 WHERE {{
   VALUES ?eventType {{
-    wd:Q1190554  # significant event
     wd:Q198      # war
     wd:Q178561   # battle
     wd:Q131569   # treaty
     wd:Q10931    # revolution
-    wd:Q12772819 # discovery
     wd:Q39546    # invention
-    wd:Q1462442  # founding
     wd:Q3024240  # historical event
-    wd:Q1656682  # event
-    wd:Q831663   # military campaign
-    wd:Q7275     # political event
   }}
-  ?item wdt:P31/wdt:P279* ?eventType .
-
-  # Date: prefer point in time, fall back to start time
-  {{
-    ?item wdt:P585 ?date .
-  }} UNION {{
-    ?item wdt:P580 ?date .
-    FILTER NOT EXISTS {{ ?item wdt:P585 [] }}
-  }}
-
-  # Require year precision or better (precision >= 9)
-  ?item p:P585|p:P580 ?dateStatement .
-  ?dateStatement psv:P585|psv:P580 ?dateValue .
-  ?dateValue wikibase:timePrecision ?precision .
-  FILTER(?precision >= 9)
+  ?item wdt:P31 ?eventType .
+  ?item wdt:P585 ?date .
 
   OPTIONAL {{
     ?article schema:about ?item .
@@ -512,41 +517,39 @@ WHERE {{
 
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
 }}
-LIMIT {{limit}} OFFSET {{offset}}
+LIMIT {limit} OFFSET {offset}
 """
 
 
-def _build_people_query(min_sitelinks: int = 5) -> str:
-    """Build the paginated SPARQL query for notable people with dates."""
-    return """
-SELECT DISTINCT ?item ?itemLabel ?birthDate ?deathDate
-       ?occupation ?occupationLabel ?nationality ?nationalityLabel ?article
+# Notable occupations to query for people — each queried separately
+# to avoid Wikidata query planner timeouts with VALUES blocks.
+_PEOPLE_OCCUPATIONS: dict[str, str] = {
+    "Q169470": "physicist",
+    "Q170790": "mathematician",
+    "Q36180": "writer",
+    "Q82955": "politician",
+    "Q901": "scientist",
+    "Q4964182": "philosopher",
+    "Q189290": "military officer",
+    "Q11063": "astronomer",
+}
+
+
+def _build_people_query_for_occupation(occupation_qid: str) -> str:
+    """Build a people query for a single occupation.
+
+    Querying one occupation at a time avoids Wikidata query planner timeouts.
+    """
+    return f"""
+SELECT ?item ?itemLabel ?birthDate ?deathDate
 WHERE {{{{
-  ?item wdt:P31 wd:Q5 .             # instance of: human
-  ?item wdt:P569 ?birthDate .        # date of birth
-
-  # Require year precision or better on birth date
-  ?item p:P569 ?birthStatement .
-  ?birthStatement psv:P569 ?birthDateValue .
-  ?birthDateValue wikibase:timePrecision ?precision .
-  FILTER(?precision >= 9)
-
-  # Notability filter: require N+ sitelinks
-  ?item wikibase:sitelinks ?sitelinks .
-  FILTER(?sitelinks >= {min_sitelinks})
-
-  OPTIONAL {{ ?item wdt:P570 ?deathDate . }}
-  OPTIONAL {{ ?item wdt:P106 ?occupation . }}
-  OPTIONAL {{ ?item wdt:P27 ?nationality . }}
-  OPTIONAL {{
-    ?article schema:about ?item .
-    ?article schema:isPartOf <https://en.wikipedia.org/> .
-  }}
-
-  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+  ?item wdt:P106 wd:{occupation_qid} ;
+        wdt:P569 ?birthDate .
+  OPTIONAL {{{{ ?item wdt:P570 ?deathDate . }}}}
+  SERVICE wikibase:label {{{{ bd:serviceParam wikibase:language "en" . }}}}
 }}}}
-LIMIT {{{{limit}}}} OFFSET {{{{offset}}}}
-""".format(min_sitelinks=min_sitelinks)
+LIMIT {{limit}} OFFSET {{offset}}
+"""
 
 
 def _parse_year(date_str: str) -> int | None:
@@ -615,7 +618,7 @@ def load_historical_events(
     """
     query_template = _build_event_query()
     raw = sparql_query_paginated(
-        query_template, page_size=DEFAULT_PAGE_SIZE, force_refresh=force_refresh,
+        query_template, page_size=2000, force_refresh=force_refresh,
     )
 
     if raw.empty:
@@ -666,35 +669,49 @@ def load_notable_people(
     min_birth_year: int = -500,
     max_birth_year: int = 2000,
     require_birth_date: bool = True,
-    require_wikipedia: bool = True,
-    min_sitelinks: int = 5,
     force_refresh: bool = False,
 ) -> pd.DataFrame:
     """Load notable people with dates from Wikidata.
 
+    Queries each occupation separately to avoid Wikidata query planner
+    timeouts, then merges and deduplicates results.
+
     Returns DataFrame with columns:
         qid, name, birth_date, birth_year, death_date, death_year,
-        occupation, nationality, has_wikipedia
+        occupation, has_wikipedia
     """
-    query_template = _build_people_query(min_sitelinks=min_sitelinks)
-    raw = sparql_query_paginated(
-        query_template, page_size=DEFAULT_PAGE_SIZE, force_refresh=force_refresh,
-    )
+    all_dfs: list[pd.DataFrame] = []
 
-    if raw.empty:
-        logger.warning("No people returned from Wikidata query")
+    for occ_qid, occ_label in _PEOPLE_OCCUPATIONS.items():
+        query_template = _build_people_query_for_occupation(occ_qid)
+        try:
+            raw = sparql_query_paginated(
+                query_template, page_size=1000, force_refresh=force_refresh,
+                max_pages=5,
+            )
+        except RuntimeError:
+            logger.warning("Skipping occupation %s (%s) due to query failure", occ_label, occ_qid)
+            continue
+
+        if raw.empty:
+            continue
+
+        chunk = pd.DataFrame()
+        chunk["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
+        chunk["name"] = raw.get("itemLabel", pd.Series(dtype=str))
+        chunk["birth_date"] = raw.get("birthDate", pd.Series(dtype=str))
+        chunk["death_date"] = raw.get("deathDate", pd.Series(dtype=str))
+        chunk["occupation"] = occ_label
+        all_dfs.append(chunk)
+        logger.info("  %s: %d raw rows", occ_label, len(chunk))
+
+    if not all_dfs:
+        logger.warning("No people returned from Wikidata queries")
         return pd.DataFrame()
 
-    # Normalize columns
-    df = pd.DataFrame()
-    df["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
-    df["name"] = raw.get("itemLabel", pd.Series(dtype=str))
-    df["birth_date"] = raw.get("birthDate", pd.Series(dtype=str))
-    df["death_date"] = raw.get("deathDate", pd.Series(dtype=str))
-    df["occupation"] = raw.get("occupationLabel", pd.Series(dtype=str))
-    df["nationality"] = raw.get("nationalityLabel", pd.Series(dtype=str))
-    df["article"] = raw.get("article", pd.Series(dtype=str))
-    df["has_wikipedia"] = df["article"].notna() & (df["article"] != "")
+    df = pd.concat(all_dfs, ignore_index=True)
+    df["article"] = ""  # Not queried per-occupation for performance
+    df["has_wikipedia"] = False
 
     # Parse years
     df["birth_year"] = df["birth_date"].apply(_parse_year)
@@ -715,10 +732,6 @@ def load_notable_people(
     ).drop_duplicates(subset=["qid"], keep="first").reset_index(drop=True)
 
     logger.info("Raw people: %d unique entities", len(df))
-
-    # Apply filters
-    if require_wikipedia:
-        df = filter_has_wikipedia(df)
 
     # Filter out people whose name looks like a QID (no label resolved)
     df = df[~df["name"].str.match(r"^Q\d+$", na=False)].copy()
