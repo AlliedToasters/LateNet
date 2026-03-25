@@ -38,6 +38,10 @@ latenet-export --input validated.parquet --output latenet_v1.parquet
 
 # View dataset statistics
 latenet-stats --input candidates.parquet
+
+# QA: sample statements stratified by generator and difficulty
+latenet-qa --input candidates.parquet
+latenet-qa --input candidates.parquet --n 5 --generators chemistry geography
 ```
 
 ## How It Works
@@ -55,9 +59,9 @@ All generators share a common contract (`BaseGenerator`) and produce `Contrastiv
 | Generator | Data Source | Relation Types |
 |-----------|------------|----------------|
 | **wordnet** | NLTK WordNet | hypernymy, meronymy, antonymy, sibling |
-| geography | Natural Earth, GeoNames | contained-in, north-of, closer-to |
+| **geography** | Natural Earth, GeoNames | contained-in, cardinal-direction, closer-to, population-greater, area-greater |
+| **chemistry** | mendeleev (periodic table) | symbol-of, member-of-group, state-at-room-temp, in-block, atomic-number-greater, property-greater |
 | temporal | Historical databases | before, after, century-of |
-| chemistry | Periodic table, PubChem | symbol-of, property-of, group-membership |
 | language | Translation dictionaries | translates-to |
 | magnitude | World Bank, reference tables | greater-than, less-than |
 | authorship | Literary/scientific databases | written-by, proposed-by |
@@ -105,6 +109,41 @@ latenet/
 ├── tests/
 ├── pyproject.toml
 └── README.md
+```
+
+## QA Sampling
+
+The `latenet-qa` script samples true/false pairs from a generated parquet file, stratified by **generator x difficulty**. This gives a quick human-readable view for manual spot-checking as new generators and datasets are added.
+
+```bash
+# Default: 3 samples per generator x difficulty bucket
+latenet-qa --input candidates.parquet
+
+# More samples, filtered to specific generators
+latenet-qa --input candidates.parquet --n 5 --generators chemistry
+
+# Reproducible sampling
+latenet-qa --input candidates.parquet --seed 123
+```
+
+Example output:
+```
+======================================================================
+Generator: chemistry
+  Total pairs: 20
+  Relation types: symbol_of
+  Difficulties: hard, medium
+======================================================================
+
+--- chemistry / hard (10 pairs, showing 2) ---
+
+  pair_id:    4c0efd185ba0
+  relation:   symbol_of
+  template:   chem_symbol_01
+  difficulty:  hard
+  negation:   sibling_swap
+  TRUE:  The chemical symbol for Sulfur is S.
+  FALSE: The chemical symbol for Sulfur is P.
 ```
 
 ## Design Principles

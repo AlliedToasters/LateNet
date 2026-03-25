@@ -36,6 +36,7 @@ latenet-generate = "scripts.generate:main"
 latenet-validate = "scripts.validate:main"
 latenet-export = "scripts.export:main"
 latenet-stats = "scripts.stats:main"
+latenet-qa = "scripts.qa_sample:main"
 
 [project.urls]
 Repository = "https://github.com/AlliedToasters/LateNet"
