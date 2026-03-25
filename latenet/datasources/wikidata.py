@@ -470,12 +470,265 @@ def load_organisms(
     return df
 
 
-def load_historical_events(**kwargs) -> pd.DataFrame:
-    """Load historical events from Wikidata.
+def _build_event_query() -> str:
+    """Build the paginated SPARQL query for historical events with dates."""
+    return """
+SELECT DISTINCT ?item ?itemLabel ?itemDescription ?date ?eventType ?eventTypeLabel ?article
+WHERE {{
+  VALUES ?eventType {{
+    wd:Q1190554  # significant event
+    wd:Q198      # war
+    wd:Q178561   # battle
+    wd:Q131569   # treaty
+    wd:Q10931    # revolution
+    wd:Q12772819 # discovery
+    wd:Q39546    # invention
+    wd:Q1462442  # founding
+    wd:Q3024240  # historical event
+    wd:Q1656682  # event
+    wd:Q831663   # military campaign
+    wd:Q7275     # political event
+  }}
+  ?item wdt:P31/wdt:P279* ?eventType .
 
-    Not yet implemented — stub for temporal generator.
+  # Date: prefer point in time, fall back to start time
+  {{
+    ?item wdt:P585 ?date .
+  }} UNION {{
+    ?item wdt:P580 ?date .
+    FILTER NOT EXISTS {{ ?item wdt:P585 [] }}
+  }}
+
+  # Require year precision or better (precision >= 9)
+  ?item p:P585|p:P580 ?dateStatement .
+  ?dateStatement psv:P585|psv:P580 ?dateValue .
+  ?dateValue wikibase:timePrecision ?precision .
+  FILTER(?precision >= 9)
+
+  OPTIONAL {{
+    ?article schema:about ?item .
+    ?article schema:isPartOf <https://en.wikipedia.org/> .
+  }}
+
+  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+}}
+LIMIT {{limit}} OFFSET {{offset}}
+"""
+
+
+def _build_people_query(min_sitelinks: int = 5) -> str:
+    """Build the paginated SPARQL query for notable people with dates."""
+    return """
+SELECT DISTINCT ?item ?itemLabel ?birthDate ?deathDate
+       ?occupation ?occupationLabel ?nationality ?nationalityLabel ?article
+WHERE {{{{
+  ?item wdt:P31 wd:Q5 .             # instance of: human
+  ?item wdt:P569 ?birthDate .        # date of birth
+
+  # Require year precision or better on birth date
+  ?item p:P569 ?birthStatement .
+  ?birthStatement psv:P569 ?birthDateValue .
+  ?birthDateValue wikibase:timePrecision ?precision .
+  FILTER(?precision >= 9)
+
+  # Notability filter: require N+ sitelinks
+  ?item wikibase:sitelinks ?sitelinks .
+  FILTER(?sitelinks >= {min_sitelinks})
+
+  OPTIONAL {{ ?item wdt:P570 ?deathDate . }}
+  OPTIONAL {{ ?item wdt:P106 ?occupation . }}
+  OPTIONAL {{ ?item wdt:P27 ?nationality . }}
+  OPTIONAL {{
+    ?article schema:about ?item .
+    ?article schema:isPartOf <https://en.wikipedia.org/> .
+  }}
+
+  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+}}}}
+LIMIT {{{{limit}}}} OFFSET {{{{offset}}}}
+""".format(min_sitelinks=min_sitelinks)
+
+
+def _parse_year(date_str: str) -> int | None:
+    """Extract year from an ISO date string (e.g. '1776-07-04T00:00:00Z').
+
+    Handles negative years (BCE) and Wikidata's date format.
     """
-    raise NotImplementedError("Historical events extract not yet implemented")
+    if not date_str or pd.isna(date_str):
+        return None
+    date_str = str(date_str).strip()
+    # Wikidata format: +1776-07-04T00:00:00Z or -0500-01-01T00:00:00Z
+    try:
+        if date_str.startswith(("-", "+")):
+            year_part = date_str.split("-", 2 if date_str[0] == "+" else 3)
+            if date_str[0] == "+":
+                return int(year_part[0][1:]) if year_part[0][1:] else None
+            else:
+                # Negative year: e.g. -0500-01-01T00:00:00Z
+                return -int(year_part[1])
+        # Plain ISO date
+        return int(date_str[:4])
+    except (ValueError, IndexError):
+        return None
+
+
+def _year_to_century(year: int) -> int:
+    """Convert a year to its century number.
+
+    1-100 = 1st century, 101-200 = 2nd century, etc.
+    Negative years: -500 to -401 = -5th century.
+    """
+    if year > 0:
+        return (year - 1) // 100 + 1
+    else:
+        return -((-year - 1) // 100 + 1)
+
+
+def _century_label(century: int) -> str:
+    """Convert century number to display string like '15th century'."""
+    abs_c = abs(century)
+    if abs_c % 10 == 1 and abs_c % 100 != 11:
+        suffix = "st"
+    elif abs_c % 10 == 2 and abs_c % 100 != 12:
+        suffix = "nd"
+    elif abs_c % 10 == 3 and abs_c % 100 != 13:
+        suffix = "rd"
+    else:
+        suffix = "th"
+    if century < 0:
+        return f"{abs_c}{suffix} century BC"
+    return f"{abs_c}{suffix} century"
+
+
+def load_historical_events(
+    min_year: int = -3000,
+    max_year: int = 2020,
+    require_precise_date: bool = True,
+    require_wikipedia: bool = True,
+    force_refresh: bool = False,
+) -> pd.DataFrame:
+    """Load historical events with dates from Wikidata.
+
+    Returns DataFrame with columns:
+        qid, name, description, date, year, century,
+        event_type, has_wikipedia
+    """
+    query_template = _build_event_query()
+    raw = sparql_query_paginated(
+        query_template, page_size=DEFAULT_PAGE_SIZE, force_refresh=force_refresh,
+    )
+
+    if raw.empty:
+        logger.warning("No events returned from Wikidata query")
+        return pd.DataFrame()
+
+    # Normalize columns
+    df = pd.DataFrame()
+    df["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
+    df["name"] = raw.get("itemLabel", pd.Series(dtype=str))
+    df["description"] = raw.get("itemDescription", pd.Series(dtype=str))
+    df["date"] = raw.get("date", pd.Series(dtype=str))
+    df["event_type_uri"] = raw.get("eventType", pd.Series(dtype=str))
+    df["event_type"] = raw.get("eventTypeLabel", pd.Series(dtype=str))
+    df["article"] = raw.get("article", pd.Series(dtype=str))
+    df["has_wikipedia"] = df["article"].notna() & (df["article"] != "")
+
+    # Parse year
+    df["year"] = df["date"].apply(_parse_year)
+    df = df.dropna(subset=["year"]).copy()
+    df["year"] = df["year"].astype(int)
+
+    # Apply year range filter
+    df = df[(df["year"] >= min_year) & (df["year"] <= max_year)].copy()
+
+    # Compute century
+    df["century"] = df["year"].apply(_year_to_century)
+
+    # Deduplicate: keep one row per QID (prefer rows with description)
+    df = df.sort_values(
+        "description", na_position="last"
+    ).drop_duplicates(subset=["qid"], keep="first").reset_index(drop=True)
+
+    logger.info("Raw events: %d unique entities", len(df))
+
+    # Apply filters
+    if require_wikipedia:
+        df = filter_has_wikipedia(df)
+
+    # Filter out events whose name looks like a QID (no label resolved)
+    df = df[~df["name"].str.match(r"^Q\d+$", na=False)].copy()
+
+    logger.info("Final events dataset: %d entities", len(df))
+    return df
+
+
+def load_notable_people(
+    min_birth_year: int = -500,
+    max_birth_year: int = 2000,
+    require_birth_date: bool = True,
+    require_wikipedia: bool = True,
+    min_sitelinks: int = 5,
+    force_refresh: bool = False,
+) -> pd.DataFrame:
+    """Load notable people with dates from Wikidata.
+
+    Returns DataFrame with columns:
+        qid, name, birth_date, birth_year, death_date, death_year,
+        occupation, nationality, has_wikipedia
+    """
+    query_template = _build_people_query(min_sitelinks=min_sitelinks)
+    raw = sparql_query_paginated(
+        query_template, page_size=DEFAULT_PAGE_SIZE, force_refresh=force_refresh,
+    )
+
+    if raw.empty:
+        logger.warning("No people returned from Wikidata query")
+        return pd.DataFrame()
+
+    # Normalize columns
+    df = pd.DataFrame()
+    df["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
+    df["name"] = raw.get("itemLabel", pd.Series(dtype=str))
+    df["birth_date"] = raw.get("birthDate", pd.Series(dtype=str))
+    df["death_date"] = raw.get("deathDate", pd.Series(dtype=str))
+    df["occupation"] = raw.get("occupationLabel", pd.Series(dtype=str))
+    df["nationality"] = raw.get("nationalityLabel", pd.Series(dtype=str))
+    df["article"] = raw.get("article", pd.Series(dtype=str))
+    df["has_wikipedia"] = df["article"].notna() & (df["article"] != "")
+
+    # Parse years
+    df["birth_year"] = df["birth_date"].apply(_parse_year)
+    df["death_year"] = df["death_date"].apply(_parse_year)
+
+    if require_birth_date:
+        df = df.dropna(subset=["birth_year"]).copy()
+        df["birth_year"] = df["birth_year"].astype(int)
+
+    # Apply birth year range filter
+    df = df[
+        (df["birth_year"] >= min_birth_year) & (df["birth_year"] <= max_birth_year)
+    ].copy()
+
+    # Deduplicate: keep one row per QID (prefer rows with occupation)
+    df = df.sort_values(
+        "occupation", na_position="last"
+    ).drop_duplicates(subset=["qid"], keep="first").reset_index(drop=True)
+
+    logger.info("Raw people: %d unique entities", len(df))
+
+    # Apply filters
+    if require_wikipedia:
+        df = filter_has_wikipedia(df)
+
+    # Filter out people whose name looks like a QID (no label resolved)
+    df = df[~df["name"].str.match(r"^Q\d+$", na=False)].copy()
+
+    # Convert death_year to int where present
+    if "death_year" in df.columns:
+        df["death_year"] = df["death_year"].astype("Int64")
+
+    logger.info("Final people dataset: %d entities", len(df))
+    return df
 
 
 def load_authors_and_works(**kwargs) -> pd.DataFrame:
