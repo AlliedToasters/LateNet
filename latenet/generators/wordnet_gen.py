@@ -197,8 +197,6 @@ def _make_pair_id(
 
 
 def _difficulty_for_distance(dist: int) -> str:
-    if dist == 0:
-        return ""
     if dist <= 2:
         return Difficulty.HARD.value
     if dist <= 5:
