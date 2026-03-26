@@ -188,24 +188,19 @@ class BiologyGenerator(BaseGenerator):
         # Use common_name as the display name, lowercase for natural language
         species["display_name"] = species["common_name"].str.lower()
 
-        # Build groupings for swap selection
-        self._family_groups = self._build_groups(species, "family")
-        self._order_groups = self._build_groups(species, "order")
-        self._class_groups = self._build_groups(species, "class_")
-
         # Filter orphan taxa
         if self.min_per_family > 1:
+            family_groups = self._build_groups(species, "family")
             valid_families = {
-                k for k, v in self._family_groups.items() if len(v) >= self.min_per_family
+                k for k, v in family_groups.items() if len(v) >= self.min_per_family
             }
-            family_col = "family" if "family" in species.columns else "family"
-            species = species[species[family_col].isin(valid_families)].copy()
-            # Rebuild after filtering
-            self._family_groups = self._build_groups(species, "family")
-            self._order_groups = self._build_groups(species, "order")
-            self._class_groups = self._build_groups(species, "class_")
+            species = species[species["family"].isin(valid_families)].copy()
 
+        # Reset index BEFORE building groups so stored indices are contiguous
         self._organisms = species.reset_index(drop=True)
+        self._family_groups = self._build_groups(self._organisms, "family")
+        self._order_groups = self._build_groups(self._organisms, "order")
+        self._class_groups = self._build_groups(self._organisms, "class_")
         logger.info(
             "Biology data loaded: %d species, %d families, %d orders, %d classes",
             len(self._organisms),
