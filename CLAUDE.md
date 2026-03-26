@@ -8,26 +8,41 @@ LateNet generates large-scale contrastive true/false statement pairs for probing
 
 ```bash
 # Install for development
-pip install -e .
+pip install -e ".[validation]"
 
 # Run tests
 pytest
 
-# CLI commands
-latenet-generate --seed 42 --output candidates.parquet
-latenet-generate --generators wordnet --max-depth 3 --output small.parquet
-latenet-validate --input candidates.parquet --output validated.parquet
-latenet-export --input validated.parquet --output latenet_v1.parquet
-latenet-stats --input candidates.parquet
+# Iterative workflow (the primary way to build the dataset)
+latenet-batch --generators biology temporal --max-pairs 50 --seed 42
+latenet-batch --generators chemistry --max-pairs 20 --seed 100
+latenet-stats --ledger                         # inspect ledger state
+latenet-curate --rows-per-stratum 50 --output latenet_v1.parquet
 
-# Build a balanced, validated dataset (the main data product)
+# One-shot build (legacy — fills strata in a single loop)
 latenet-build --rows-per-stratum 50 --output latenet_v1.parquet
-latenet-build --rows-per-stratum 10 --generators biology temporal --legs anthropic
+
+# Low-level tools
+latenet-generate --seed 42 --output candidates.parquet
+latenet-validate --input candidates.parquet --output validated.parquet
+latenet-stats --input candidates.parquet
 ```
 
 ## Canonical Dataset Build
 
-The main data product is a balanced, LLM-validated parquet file produced by `latenet-build`. The process:
+The main data product is a balanced, LLM-validated parquet file. The iterative workflow uses a **persistent ledger** (`data/ledger.parquet`) — an append-only record of every statement ever generated and validated, with full provenance (git hash, timestamp, batch ID).
+
+### Iterative workflow (preferred)
+
+1. **`latenet-batch`** — Generate a batch of candidates, validate with the LLM ensemble, append results to the ledger. Run repeatedly with different generators, seeds, and sizes.
+2. **`latenet-stats --ledger`** — Inspect the ledger: per-stratum fill levels, acceptance rates, provenance breakdown. Spot problematic generators.
+3. **Tweak generators** — Fix templates, add data sources, adjust difficulty calibration.
+4. **Repeat** from (1) until the ledger has enough clean rows per stratum.
+5. **`latenet-curate`** — Pull a balanced subset from the ledger to produce the final data product.
+
+### One-shot build (legacy)
+
+`latenet-build` runs a generate-validate-accept loop in a single invocation. The process:
 
 1. **Generate** — Each generator produces candidate contrastive pairs from structured data sources (WordNet, Wikidata, Natural Earth, mendeleev). Generation is deterministic per seed.
 2. **Validate** — Every candidate is judged by two independent validators:
@@ -71,7 +86,7 @@ Download WordNet data: `python -c "import nltk; nltk.download('wordnet')"`
 - **negation/** — False statement strategies (`strategies.py`)
 - **difficulty/** — Difficulty tiers and semantic distance scoring (`tiers.py`)
 - **validation/** — LLM ensemble voting (`voting.py`), dispute escalation (`escalation.py`), quality filters (`filters.py`), stratified build loop (`stratified.py`)
-- **io/** — Parquet export with standardized schema (`export.py`)
+- **io/** — Parquet export (`export.py`), persistent ledger (`ledger.py`), provenance stamping (`provenance.py`)
 
 ### Generator contract
 
@@ -83,7 +98,7 @@ All generators subclass `BaseGenerator` and implement:
 
 ### CLI scripts: `scripts/`
 
-Entry points defined in `pyproject.toml`: `latenet-generate`, `latenet-validate`, `latenet-build`, `latenet-export`, `latenet-stats`.
+Entry points defined in `pyproject.toml`: `latenet-batch`, `latenet-curate`, `latenet-build`, `latenet-generate`, `latenet-validate`, `latenet-stats`, `latenet-export`, `latenet-qa`.
 
 ## Key Design Decisions
 
@@ -92,8 +107,12 @@ Entry points defined in `pyproject.toml`: `latenet-generate`, `latenet-validate`
 - **Incremental by design** — generate a batch, validate it, append. Don't require full regeneration
 - **Difficulty is semantic distance** — hard=sibling swap, medium=cousin swap, easy=distant subtree
 - **Validation uses ensemble voting** — Llama 405B (logit-level via NDIF/lmprobe) + Sonnet vote, Opus escalation on Sonnet disagreements only
-- **Stratified build loop** — `latenet-build` generates, validates, and loops until per-(generator, difficulty) quotas are met. Only rows where *both* validators agree with GT are accepted. Disputes go to a sidecar file for analysis. Each round uses `seed + round * 1000` for new candidates
+- **Ledger-based workflow** — `latenet-batch` generates, validates, and appends to a persistent ledger (`data/ledger.parquet`). Every row carries `git_hash`, `generated_at`, and `batch_id` for provenance. `latenet-curate` pulls balanced strata from the ledger to produce the final data product. `latenet-build` still available for one-shot stratified builds
 - **Adding a new generator** — subclass BaseGenerator, implement the contract, register in `scripts/generate.py` GENERATORS dict
+
+## Git / Merge Policy
+
+- **Never squash commits on merge.** Every generated row in the ledger carries a `git_hash` linking it to the code version that produced it. Squashing rewrites commit hashes, which would break provenance tracing. Use merge commits or rebase (without squash) for PRs
 
 ## Code Conventions
 

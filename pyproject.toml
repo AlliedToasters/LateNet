@@ -38,6 +38,8 @@ latenet-export = "scripts.export:main"
 latenet-stats = "scripts.stats:main"
 latenet-qa = "scripts.qa_sample:main"
 latenet-build = "scripts.build_dataset:main"
+latenet-batch = "scripts.batch:main"
+latenet-curate = "scripts.curate:main"
 
 [project.urls]
 Repository = "https://github.com/AlliedToasters/LateNet"

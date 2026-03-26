@@ -24,12 +24,18 @@ pip install -e .
 ## Quick Start
 
 ```bash
-# Build the canonical dataset (generate + validate + balance in one step)
-latenet-build --rows-per-stratum 50 --seed 42 --output latenet_v1.parquet
+# 1. Generate a batch, validate it, append to the persistent ledger
+latenet-batch --generators biology geography --max-pairs 50 --seed 42
 
-# This produces:
-#   latenet_v1.parquet           — clean, balanced dataset
-#   latenet_v1.disputes.parquet  — rows where validators disagreed (for analysis)
+# 2. Inspect the ledger — see per-stratum fill levels, acceptance rates
+latenet-stats --ledger
+
+# 3. Run more batches as needed (different generators, seeds)
+latenet-batch --generators chemistry --max-pairs 20 --seed 100
+latenet-batch --generators wordnet --max-pairs 200 --seed 200
+
+# 4. Curate the final balanced dataset from the ledger
+latenet-curate --rows-per-stratum 50 --output latenet_v1.parquet
 ```
 
 Requires `ANTHROPIC_API_KEY` and `NDIF_API_KEY` environment variables for the validation pipeline.
@@ -37,21 +43,16 @@ Requires `ANTHROPIC_API_KEY` and `NDIF_API_KEY` environment variables for the va
 ### Other CLI tools
 
 ```bash
+# One-shot stratified build (generate + validate + balance in one step)
+latenet-build --rows-per-stratum 50 --seed 42 --output latenet_v1.parquet
+
 # Generate candidates without validation
 latenet-generate --seed 42 --output candidates.parquet
-latenet-generate --generators wordnet --max-depth 8 --output candidates.parquet
 
-# Validate an existing dataset (one-shot, no stratification loop)
+# Validate an existing dataset
 latenet-validate --input candidates.parquet --output validated.parquet
 
-# Export final dataset
-latenet-export --input validated.parquet --output latenet_v1.parquet
-
-# View dataset statistics
-latenet-stats --input candidates.parquet
-
 # QA: sample statements stratified by generator and difficulty
-latenet-qa --input candidates.parquet
 latenet-qa --input candidates.parquet --n 5 --generators chemistry geography
 ```
 
