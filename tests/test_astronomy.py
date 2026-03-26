@@ -167,6 +167,26 @@ class TestClassification:
         for stmt in pluto_stmts:
             assert "ninth planet" not in stmt
 
+    def test_no_double_planet(self):
+        gen = _make_generator()
+        pairs = list(gen._generate_classification())
+        for p in pairs:
+            assert "planet planet" not in p.true_statement
+            assert "planet planet" not in p.false_statement
+
+    def test_article_agreement(self):
+        gen = _make_generator()
+        pairs = list(gen._generate_classification())
+        for p in pairs:
+            assert "a ice" not in p.true_statement
+            assert "a ice" not in p.false_statement
+
+    def test_medium_tier_present(self):
+        gen = _make_generator()
+        pairs = list(gen._generate_classification())
+        diffs = {p.difficulty for p in pairs}
+        assert Difficulty.MEDIUM.value in diffs
+
 
 # --- Stellar properties ---
 
@@ -226,6 +246,12 @@ class TestConstellation:
         pairs = list(gen._generate_constellation())
         pol_pairs = [p for p in pairs if "Polaris" in p.true_statement]
         assert any("Ursa Minor" in p.true_statement for p in pol_pairs)
+
+    def test_medium_tier_present(self):
+        gen = _make_generator()
+        pairs = list(gen._generate_constellation())
+        diffs = {p.difficulty for p in pairs}
+        assert Difficulty.MEDIUM.value in diffs
 
 
 # --- Determinism ---

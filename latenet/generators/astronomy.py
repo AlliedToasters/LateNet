@@ -75,9 +75,9 @@ _MAGNITUDE_TEMPLATES = [
 ]
 
 _TYPE_TEMPLATES = [
-    AstroTemplate("astro_type_01", "is_type", "{planet} is a {type}."),
-    AstroTemplate("astro_type_02", "is_type", "{planet} is classified as a {type}."),
-    AstroTemplate("astro_type_03", "is_type", "{planet} is a {type} planet."),
+    AstroTemplate("astro_type_01", "is_type", "{planet} is {type}."),
+    AstroTemplate("astro_type_02", "is_type", "{planet} is classified as {type}."),
+    AstroTemplate("astro_type_03", "is_type", "{planet} is categorized as {type}."),
 ]
 
 _STAR_PROP_TEMPLATES = [
@@ -460,45 +460,48 @@ class AstronomyGenerator(BaseGenerator):
             true_type = body.planet_type
             true_label = TYPE_LABELS[true_type]
             template = self._pick_template("is_type")
-
-            # For dwarf planets, avoid "astro_type_03" which says "{planet} is a {type} planet"
-            # since "Pluto is a dwarf planet planet" is wrong.
-            if body.is_dwarf_planet and template.id == "astro_type_03":
-                template = _ALL_TEMPLATES["is_type"][0]  # plain "is a {type}"
-
             true_stmt = template.pattern.format(planet=body.name, type=true_label)
 
             wrong_types = [t for t in PLANET_TYPES if t != true_type]
 
-            # Hard: similar type swap
+            # Hard: most similar type
             similar_map: dict[str, list[str]] = {
                 "terrestrial": ["ice_giant"],
                 "gas_giant": ["ice_giant"],
-                "ice_giant": ["gas_giant", "terrestrial"],
+                "ice_giant": ["gas_giant"],
                 "dwarf_planet": ["terrestrial"],
+            }
+            # Medium: intermediate similarity
+            medium_map: dict[str, list[str]] = {
+                "terrestrial": ["dwarf_planet"],
+                "gas_giant": ["terrestrial"],
+                "ice_giant": ["terrestrial", "dwarf_planet"],
+                "dwarf_planet": ["ice_giant"],
             }
             # Easy: maximally different swap
             distant_map: dict[str, list[str]] = {
                 "terrestrial": ["gas_giant"],
-                "gas_giant": ["terrestrial", "dwarf_planet"],
-                "ice_giant": ["dwarf_planet"],
+                "gas_giant": ["dwarf_planet"],
+                "ice_giant": ["gas_giant"],
                 "dwarf_planet": ["gas_giant"],
             }
 
             hard_candidates = [t for t in similar_map.get(true_type, []) if t in wrong_types]
+            medium_candidates = [t for t in medium_map.get(true_type, []) if t in wrong_types]
             easy_candidates = [t for t in distant_map.get(true_type, []) if t in wrong_types]
 
-            if hard_candidates:
-                wrong = self.rng.choice(hard_candidates)
+            for candidates, difficulty, strategy in [
+                (hard_candidates, Difficulty.HARD.value, NegationStrategy.SIBLING_SWAP.value),
+                (medium_candidates, Difficulty.MEDIUM.value, NegationStrategy.SIBLING_SWAP.value),
+                (easy_candidates, Difficulty.EASY.value, NegationStrategy.DISTANT_SWAP.value),
+            ]:
+                if not candidates:
+                    continue
+                wrong = self.rng.choice(candidates)
                 wrong_label = TYPE_LABELS[wrong]
-                # Avoid double "planet" in type_03 template
-                t = template
-                if body.is_dwarf_planet or wrong == "dwarf_planet":
-                    if t.id == "astro_type_03":
-                        t = _ALL_TEMPLATES["is_type"][0]
-                false_stmt = t.pattern.format(planet=body.name, type=wrong_label)
+                false_stmt = template.pattern.format(planet=body.name, type=wrong_label)
                 pair_id = _make_pair_id([
-                    "astro", "type", body.name, wrong, t.id, "hard",
+                    "astro", "type", body.name, wrong, template.id, difficulty,
                 ])
                 yield ContrastivePair(
                     true_statement=true_stmt,
@@ -506,35 +509,11 @@ class AstronomyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="astronomy",
                     relation_type="is_type",
-                    difficulty=Difficulty.HARD.value,
+                    difficulty=difficulty,
                     semantic_distance=None,
                     generator=self.name,
-                    template_id=t.id,
-                    negation_strategy=NegationStrategy.SIBLING_SWAP.value,
-                )
-
-            if easy_candidates:
-                wrong = self.rng.choice(easy_candidates)
-                wrong_label = TYPE_LABELS[wrong]
-                t = template
-                if body.is_dwarf_planet or wrong == "dwarf_planet":
-                    if t.id == "astro_type_03":
-                        t = _ALL_TEMPLATES["is_type"][0]
-                false_stmt = t.pattern.format(planet=body.name, type=wrong_label)
-                pair_id = _make_pair_id([
-                    "astro", "type", body.name, wrong, t.id, "easy",
-                ])
-                yield ContrastivePair(
-                    true_statement=true_stmt,
-                    false_statement=false_stmt,
-                    pair_id=pair_id,
-                    domain="astronomy",
-                    relation_type="is_type",
-                    difficulty=Difficulty.EASY.value,
-                    semantic_distance=None,
-                    generator=self.name,
-                    template_id=t.id,
-                    negation_strategy=NegationStrategy.DISTANT_SWAP.value,
+                    template_id=template.id,
+                    negation_strategy=strategy,
                 )
 
     # --- Stellar properties ---
@@ -642,24 +621,40 @@ class AstronomyGenerator(BaseGenerator):
             if not wrong_consts:
                 continue
 
-            # Hard: nearby constellation (same hemisphere)
+            # Classify wrong constellations by hemisphere relationship
             true_hemisphere = next(
                 (c.hemisphere for c in CONSTELLATIONS if c.name == true_const), None
             )
-            same_hemi = [
+            const_hemi = {c.name: c.hemisphere for c in CONSTELLATIONS}
+
+            # Hard: same specific hemisphere (northern/southern match, not "both")
+            hard_consts = [
                 c for c in wrong_consts
-                if any(
-                    co.hemisphere == true_hemisphere or co.hemisphere == "both"
-                    for co in CONSTELLATIONS if co.name == c
-                )
+                if const_hemi.get(c) == true_hemisphere
+                and true_hemisphere != "both"
             ]
-            diff_hemi = [c for c in wrong_consts if c not in same_hemi]
+            # Medium: "both" hemisphere constellations, or true is "both" and wrong is specific
+            medium_consts = [
+                c for c in wrong_consts
+                if const_hemi.get(c) == "both" or (true_hemisphere == "both" and const_hemi.get(c) != "both")
+            ]
+            # Easy: opposite hemisphere
+            easy_consts = [
+                c for c in wrong_consts
+                if c not in hard_consts and c not in medium_consts
+            ]
 
-            if same_hemi:
-                wrong = self.rng.choice(same_hemi)
+            for candidates, difficulty, strategy in [
+                (hard_consts, Difficulty.HARD.value, NegationStrategy.SIBLING_SWAP.value),
+                (medium_consts, Difficulty.MEDIUM.value, NegationStrategy.SIBLING_SWAP.value),
+                (easy_consts, Difficulty.EASY.value, NegationStrategy.DISTANT_SWAP.value),
+            ]:
+                if not candidates:
+                    continue
+                wrong = self.rng.choice(candidates)
                 false_stmt = template.pattern.format(star=star_name, constellation=wrong)
                 pair_id = _make_pair_id([
-                    "astro", "constellation", star_name, wrong, template.id, "hard",
+                    "astro", "constellation", star_name, wrong, template.id, difficulty,
                 ])
                 yield ContrastivePair(
                     true_statement=true_stmt,
@@ -667,28 +662,9 @@ class AstronomyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="astronomy",
                     relation_type="in_constellation",
-                    difficulty=Difficulty.HARD.value,
+                    difficulty=difficulty,
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
-                    negation_strategy=NegationStrategy.SIBLING_SWAP.value,
-                )
-
-            if diff_hemi:
-                wrong = self.rng.choice(diff_hemi)
-                false_stmt = template.pattern.format(star=star_name, constellation=wrong)
-                pair_id = _make_pair_id([
-                    "astro", "constellation", star_name, wrong, template.id, "easy",
-                ])
-                yield ContrastivePair(
-                    true_statement=true_stmt,
-                    false_statement=false_stmt,
-                    pair_id=pair_id,
-                    domain="astronomy",
-                    relation_type="in_constellation",
-                    difficulty=Difficulty.EASY.value,
-                    semantic_distance=None,
-                    generator=self.name,
-                    template_id=template.id,
-                    negation_strategy=NegationStrategy.DISTANT_SWAP.value,
+                    negation_strategy=strategy,
                 )
