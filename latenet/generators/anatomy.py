@@ -25,6 +25,7 @@ from latenet.generators.anat_data import (
     SYSTEM_LABELS,
     AnatomicalStructure,
 )
+from latenet.sanitize import render_template
 from latenet.types import ContrastivePair, Difficulty, NegationStrategy
 
 logger = logging.getLogger(__name__)
@@ -65,9 +66,9 @@ _REGION_TEMPLATES = [
 
 _TYPE_TEMPLATES = [
     AnatTemplate("anat_type_01", "is_structure_type",
-                 "The {structure} is a {type}."),
+                 "The {structure} is {a_type}."),
     AnatTemplate("anat_type_02", "is_structure_type",
-                 "The {structure} is classified as a {type}."),
+                 "The {structure} is classified as {a_type}."),
     AnatTemplate("anat_type_03", "is_structure_type",
                  "The {structure} is a type of {type}."),
 ]
@@ -259,8 +260,8 @@ class AnatomyGenerator(BaseGenerator):
                 wrong_label = SYSTEM_LABELS[wrong_system]
 
                 template = self._pick_template("in_system")
-                true_stmt = template.pattern.format(structure=struct.name, system=true_label)
-                false_stmt = template.pattern.format(structure=struct.name, system=wrong_label)
+                true_stmt = render_template(template.pattern,structure=struct.name, system=true_label)
+                false_stmt = render_template(template.pattern,structure=struct.name, system=wrong_label)
 
                 pair_id = _make_pair_id([
                     "anat", "system", struct.name, wrong_system, template.id, difficulty,
@@ -321,8 +322,8 @@ class AnatomyGenerator(BaseGenerator):
                 wrong_label = REGION_LABELS[wrong_region]
 
                 template = self._pick_template("in_region")
-                true_stmt = template.pattern.format(structure=struct.name, region=true_label)
-                false_stmt = template.pattern.format(structure=struct.name, region=wrong_label)
+                true_stmt = render_template(template.pattern,structure=struct.name, region=true_label)
+                false_stmt = render_template(template.pattern,structure=struct.name, region=wrong_label)
 
                 pair_id = _make_pair_id([
                     "anat", "region", struct.name, wrong_region, template.id, difficulty,
@@ -376,8 +377,8 @@ class AnatomyGenerator(BaseGenerator):
                 wrong_label = STRUCTURE_TYPE_LABELS[wrong_type]
 
                 template = self._pick_template("is_structure_type")
-                true_stmt = template.pattern.format(structure=struct.name, type=true_label)
-                false_stmt = template.pattern.format(structure=struct.name, type=wrong_label)
+                true_stmt = render_template(template.pattern,structure=struct.name, type=true_label)
+                false_stmt = render_template(template.pattern,structure=struct.name, type=wrong_label)
 
                 pair_id = _make_pair_id([
                     "anat", "type", struct.name, wrong_type, template.id, difficulty,
@@ -422,7 +423,7 @@ class AnatomyGenerator(BaseGenerator):
                 region_label = REGION_LABELS[region]
 
                 template = self._pick_template("same_region")
-                true_stmt = template.pattern.format(
+                true_stmt = render_template(template.pattern,
                     structureA=a.name, structureB=b.name, region=region_label,
                 )
 
@@ -457,7 +458,7 @@ class AnatomyGenerator(BaseGenerator):
                     if not candidates:
                         continue
                     c = self.rng.choice(candidates)
-                    false_stmt = template.pattern.format(
+                    false_stmt = render_template(template.pattern,
                         structureA=a.name, structureB=c.name, region=region_label,
                     )
 
@@ -503,7 +504,7 @@ class AnatomyGenerator(BaseGenerator):
                 system_label = SYSTEM_LABELS[system]
 
                 template = self._pick_template("same_system")
-                true_stmt = template.pattern.format(
+                true_stmt = render_template(template.pattern,
                     structureA=a.name, structureB=b.name, system=system_label,
                 )
 
@@ -540,7 +541,7 @@ class AnatomyGenerator(BaseGenerator):
                     if not candidates:
                         continue
                     c = self.rng.choice(candidates)
-                    false_stmt = template.pattern.format(
+                    false_stmt = render_template(template.pattern,
                         structureA=a.name, structureB=c.name, system=system_label,
                     )
 

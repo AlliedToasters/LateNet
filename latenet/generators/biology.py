@@ -16,6 +16,7 @@ import pandas as pd
 
 from latenet.datasources.wikidata import RANK_LEVEL, RANK_ORDER, load_organisms
 from latenet.generators.base import BaseGenerator
+from latenet.sanitize import render_template
 from latenet.types import ContrastivePair, Difficulty, NegationStrategy
 
 logger = logging.getLogger(__name__)
@@ -35,15 +36,15 @@ class BioTemplate:
 # Taxonomic membership: "{organism} is a {taxon}"
 _MEMBERSHIP_TEMPLATES = [
     BioTemplate("bio_membership_01", "is_member_of",
-                 "A {organism} is a {taxon}."),
+                 "{a_organism} is {a_taxon}."),
     BioTemplate("bio_membership_02", "is_member_of",
-                 "A {organism} is a type of {taxon}."),
+                 "{a_organism} is a type of {taxon}."),
     BioTemplate("bio_membership_03", "is_member_of",
                  "The {organism} belongs to the group {taxon}."),
     BioTemplate("bio_membership_04", "is_member_of",
-                 "{organism} is classified as a {taxon}."),
+                 "{organism} is classified as {a_taxon}."),
     BioTemplate("bio_membership_05", "is_member_of",
-                 "A {organism} is a kind of {taxon}."),
+                 "{a_organism} is a kind of {taxon}."),
 ]
 
 # Taxonomic sibling: "{A} and {B} are in the same {rank}"
@@ -303,10 +304,10 @@ class BiologyGenerator(BaseGenerator):
 
                 for swap_taxon, difficulty, strategy, sem_dist in swap_info:
                     template = self._pick_template("is_member_of")
-                    true_stmt = template.pattern.format(
+                    true_stmt = render_template(template.pattern,
                         organism=org_name, taxon=true_taxon.lower()
                     )
-                    false_stmt = template.pattern.format(
+                    false_stmt = render_template(template.pattern,
                         organism=org_name, taxon=swap_taxon.lower()
                     )
 
@@ -435,7 +436,7 @@ class BiologyGenerator(BaseGenerator):
                 name_b = self._organism_name(idx_b)
 
                 template = self._pick_template("same_taxon")
-                true_stmt = template.pattern.format(
+                true_stmt = render_template(template.pattern,
                     organismA=name_a, organismB=name_b,
                     rank=_RANK_DISPLAY.get(rank_label, rank_label),
                 )
@@ -449,7 +450,7 @@ class BiologyGenerator(BaseGenerator):
                 idx_c = self.rng.choice(other_indices)
                 name_c = self._organism_name(idx_c)
 
-                false_stmt = template.pattern.format(
+                false_stmt = render_template(template.pattern,
                     organismA=name_a, organismB=name_c,
                     rank=_RANK_DISPLAY.get(rank_label, rank_label),
                 )
@@ -498,10 +499,10 @@ class BiologyGenerator(BaseGenerator):
 
                 # "specific is a more specific rank than general" (true)
                 template = _ALL_TEMPLATES["has_rank"][0]  # "more specific"
-                true_stmt = template.pattern.format(
+                true_stmt = render_template(template.pattern,
                     rankA=_RANK_DISPLAY[specific], rankB=_RANK_DISPLAY[general],
                 )
-                false_stmt = template.pattern.format(
+                false_stmt = render_template(template.pattern,
                     rankA=_RANK_DISPLAY[general], rankB=_RANK_DISPLAY[specific],
                 )
 
@@ -533,10 +534,10 @@ class BiologyGenerator(BaseGenerator):
 
                 # Also generate with "more general" template
                 template2 = _ALL_TEMPLATES["has_rank"][1]  # "more general"
-                true_stmt2 = template2.pattern.format(
+                true_stmt2 = render_template(template2.pattern,
                     rankA=_RANK_DISPLAY[general], rankB=_RANK_DISPLAY[specific],
                 )
-                false_stmt2 = template2.pattern.format(
+                false_stmt2 = render_template(template2.pattern,
                     rankA=_RANK_DISPLAY[specific], rankB=_RANK_DISPLAY[general],
                 )
 

@@ -28,6 +28,130 @@ logger = logging.getLogger(__name__)
 VALID_LEGS = {"ndif", "anthropic"}
 
 
+def _run_grammar_pipeline(df: pd.DataFrame) -> pd.DataFrame:
+    """Run grammar scanning (Layer 2) and correction (Layer 3) on candidates.
+
+    Operates on the DataFrame of statement rows (two rows per pair: true + false).
+    Returns the DataFrame with grammar-corrected statements and metadata columns.
+    Pairs where Sonnet flags a statement as unfixable are excluded entirely.
+    """
+    from latenet.quality.grammar import GrammarScanner, GrammarCorrector
+    from latenet.types import ContrastivePair
+
+    scanner = GrammarScanner()
+    if not scanner.available:
+        logger.warning("Grammar scanner unavailable (no Java?) — skipping Layers 2 & 3")
+        return df
+
+    # Reconstruct pairs from rows: group by pair_id
+    pair_ids = df["pair_id"].unique()
+    flagged_stmts: list[tuple[str, str, str]] = []  # (pair_id, side, statement)
+    pair_flags: dict[str, list[str]] = {}  # pair_id -> list of rule_ids
+
+    for pid in pair_ids:
+        pair_rows = df[df["pair_id"] == pid]
+        true_row = pair_rows[pair_rows["label"] == True]  # noqa: E712
+        false_row = pair_rows[pair_rows["label"] == False]  # noqa: E712
+        if true_row.empty or false_row.empty:
+            continue
+
+        true_stmt = true_row.iloc[0]["statement"]
+        false_stmt = false_row.iloc[0]["statement"]
+
+        true_flags = scanner.scan(true_stmt)
+        false_flags = scanner.scan(false_stmt)
+
+        if true_flags or false_flags:
+            rule_ids = [f.rule_id for f in true_flags + false_flags]
+            pair_flags[pid] = rule_ids
+            if true_flags:
+                flagged_stmts.append((pid, "true", true_stmt))
+            if false_flags:
+                flagged_stmts.append((pid, "false", false_stmt))
+
+    n_flagged = len(pair_flags)
+    logger.info(
+        "Grammar scan: %d pairs scanned, %d flagged (%.1f%%)",
+        len(pair_ids), n_flagged,
+        100 * n_flagged / len(pair_ids) if pair_ids.size else 0,
+    )
+
+    if not flagged_stmts:
+        return df
+
+    # Layer 3: Sonnet correction on flagged statements only
+    corrector = GrammarCorrector()
+    if not corrector.available:
+        logger.warning("Grammar corrector unavailable — keeping flagged rows uncorrected")
+        # Still add metadata about flags
+        df["grammar_flags"] = df["pair_id"].map(
+            lambda pid: ",".join(pair_flags.get(pid, []))  # noqa: B023
+        )
+        return df
+
+    statements = [s for _, _, s in flagged_stmts]
+    results = corrector.correct_batch(statements)
+
+    # Map corrections back
+    corrections: dict[tuple[str, str], str | None] = {}  # (pair_id, side) -> corrected
+    excluded_pairs: set[str] = set()
+    corrected_count = 0
+
+    for (pid, side, _), result in zip(flagged_stmts, results):
+        if result.status == "flagged":
+            excluded_pairs.add(pid)
+            logger.info("Excluding pair %s: %s", pid, result.changes)
+        elif result.status == "corrected" and result.corrected:
+            corrections[(pid, side)] = result.corrected
+            corrected_count += 1
+
+    # Apply corrections to df
+    for (pid, side), corrected_text in corrections.items():
+        label = True if side == "true" else False
+        mask = (df["pair_id"] == pid) & (df["label"] == label)
+        df.loc[mask, "original_statement"] = df.loc[mask, "statement"]
+        df.loc[mask, "statement"] = corrected_text
+
+    # Add metadata
+    df["grammar_corrected"] = df["pair_id"].map(
+        lambda pid: pid in {p for (p, _) in corrections}  # noqa: B023
+    )
+    df["grammar_flags"] = df["pair_id"].map(
+        lambda pid: ",".join(pair_flags.get(pid, []))  # noqa: B023
+    )
+
+    # Exclude flagged pairs
+    if excluded_pairs:
+        before = len(df)
+        df = df[~df["pair_id"].isin(excluded_pairs)].copy()
+        logger.info(
+            "Excluded %d pairs (%d rows) flagged as unfixable by Sonnet",
+            len(excluded_pairs), before - len(df),
+        )
+
+    logger.info(
+        "Grammar correction: %d statements corrected, %d pairs excluded",
+        corrected_count, len(excluded_pairs),
+    )
+
+    # Per-generator summary
+    if pair_flags:
+        gen_stats: dict[str, dict[str, int]] = {}
+        for pid in pair_flags:
+            pair_rows = df[df["pair_id"] == pid]
+            if not pair_rows.empty:
+                gen = pair_rows.iloc[0].get("generator", "unknown")
+                if gen not in gen_stats:
+                    gen_stats[gen] = {"flagged": 0, "excluded": 0}
+                gen_stats[gen]["flagged"] += 1
+                if pid in excluded_pairs:
+                    gen_stats[gen]["excluded"] += 1
+        for gen, stats in sorted(gen_stats.items()):
+            logger.info("  %s: %d flagged, %d excluded", gen, stats["flagged"], stats["excluded"])
+
+    return df
+
+
 def _validate_from_ledger(args: argparse.Namespace, ledger_dir: Path) -> None:
     """Sample unvalidated rows from the ledger and validate them."""
     from latenet.io.ledger import append_to_ledger
@@ -145,6 +269,10 @@ def main():
         help="Skip generation; sample unvalidated rows from the existing ledger "
              "for validation. Use with --validate-per-stratum to control sample size.",
     )
+    parser.add_argument(
+        "--skip-grammar", action="store_true",
+        help="Skip grammar scanning and correction (Layers 2 & 3).",
+    )
     args = parser.parse_args()
 
     legs = set(args.legs)
@@ -208,6 +336,10 @@ def main():
 
     # --- 3. Stamp provenance ---
     candidates_df = stamp_provenance(candidates_df, seed=args.seed)
+
+    # --- 3.5. Grammar check (Layers 2 & 3) ---
+    if not args.skip_grammar:
+        candidates_df = _run_grammar_pipeline(candidates_df)
 
     # --- 4. Sample down to validate-per-stratum if requested ---
     unvalidated_rows: pd.DataFrame | None = None

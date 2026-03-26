@@ -7,6 +7,8 @@ from enum import Enum
 
 from nltk.corpus.reader.wordnet import Synset
 
+from latenet.sanitize import sanitize_statement
+
 
 class RelationshipType(Enum):
     HYPERNYMY = "hypernymy"
@@ -58,6 +60,10 @@ class ContrastivePair:
     target_synset: str | None = None
     neg_synset: str | None = None
     tier: int = 1
+
+    def __post_init__(self) -> None:
+        self.true_statement = sanitize_statement(self.true_statement)
+        self.false_statement = sanitize_statement(self.false_statement)
 
     def to_rows(self) -> list[dict]:
         """Expand into true + false row dicts for DataFrame export."""

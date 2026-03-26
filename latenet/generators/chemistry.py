@@ -17,6 +17,7 @@ from mendeleev import element as get_element
 from mendeleev.fetch import fetch_table
 
 from latenet.generators.base import BaseGenerator
+from latenet.sanitize import render_template
 from latenet.types import ContrastivePair, Difficulty, NegationStrategy
 
 logger = logging.getLogger(__name__)
@@ -51,23 +52,23 @@ _SYMBOL_TEMPLATES = [
 # Group/series membership
 _GROUP_TEMPLATES = [
     ChemTemplate("chem_group_01", "member_of_group",
-                 "{element} is a {series_name}."),
+                 "{element} is {a_series_name}."),
     ChemTemplate("chem_group_02", "member_of_group",
                  "{element} belongs to the {series_name} group."),
     ChemTemplate("chem_group_03", "member_of_group",
-                 "{element} is classified as a {series_name}."),
+                 "{element} is classified as {a_series_name}."),
     ChemTemplate("chem_group_04", "member_of_group",
-                 "The element {element} is a {series_name}."),
+                 "The element {element} is {a_series_name}."),
 ]
 
 # State of matter
 _STATE_TEMPLATES = [
     ChemTemplate("chem_state_01", "state_at_room_temp",
-                 "{element} is a {state} at room temperature."),
+                 "{element} is {a_state} at room temperature."),
     ChemTemplate("chem_state_02", "state_at_room_temp",
-                 "At room temperature, {element} is a {state}."),
+                 "At room temperature, {element} is {a_state}."),
     ChemTemplate("chem_state_03", "state_at_room_temp",
-                 "{element} exists as a {state} under standard conditions."),
+                 "{element} exists as {a_state} under standard conditions."),
 ]
 
 # Block membership
@@ -378,10 +379,10 @@ class ChemistryGenerator(BaseGenerator):
 
             for swap_el, difficulty, strategy in swaps[:self.max_false_per_true]:
                 # Swap the symbol: "The chemical symbol for gold is Ag"
-                false_stmt = template.pattern.format(
+                false_stmt = render_template(template.pattern,
                     element=name, symbol=swap_el["symbol"]
                 )
-                true_stmt = template.pattern.format(element=name, symbol=symbol)
+                true_stmt = render_template(template.pattern,element=name, symbol=symbol)
                 pair_id = _make_pair_id([
                     "chem", "symbol", name, swap_el["symbol"], template.id
                 ])
@@ -419,7 +420,7 @@ class ChemistryGenerator(BaseGenerator):
 
             el_name = el_row["name"]
             template = self._pick_template("member_of_group")
-            true_stmt = template.pattern.format(
+            true_stmt = render_template(template.pattern,
                 element=el_name, series_name=series_label
             )
 
@@ -444,7 +445,7 @@ class ChemistryGenerator(BaseGenerator):
             if nearby:
                 # Hard: closest series
                 hard_series = nearby[0]
-                false_stmt = template.pattern.format(
+                false_stmt = render_template(template.pattern,
                     element=el_name, series_name=hard_series
                 )
                 pair_id = _make_pair_id([
@@ -467,7 +468,7 @@ class ChemistryGenerator(BaseGenerator):
             if len(nearby) > 1 and swaps_emitted < self.max_false_per_true:
                 # Easy: farthest series
                 easy_series = nearby[-1]
-                false_stmt = template.pattern.format(
+                false_stmt = render_template(template.pattern,
                     element=el_name, series_name=easy_series
                 )
                 pair_id = _make_pair_id([
@@ -503,7 +504,7 @@ class ChemistryGenerator(BaseGenerator):
                 continue
 
             template = self._pick_template("state_at_room_temp")
-            true_stmt = template.pattern.format(element=el_name, state=true_state)
+            true_stmt = render_template(template.pattern,element=el_name, state=true_state)
 
             # Hard: adjacent state (solid<->liquid, liquid<->gas)
             if true_state == "liquid":
@@ -513,7 +514,7 @@ class ChemistryGenerator(BaseGenerator):
             else:  # gas
                 hard_state = "liquid"
 
-            false_stmt = template.pattern.format(element=el_name, state=hard_state)
+            false_stmt = render_template(template.pattern,element=el_name, state=hard_state)
             pair_id = _make_pair_id([
                 "chem", "state", el_name, hard_state, template.id
             ])
@@ -539,7 +540,7 @@ class ChemistryGenerator(BaseGenerator):
                 # Liquid — already emitted one, pick the other wrong state
                 easy_state = [s for s in wrong_states if s != hard_state][0]
 
-            false_stmt = template.pattern.format(element=el_name, state=easy_state)
+            false_stmt = render_template(template.pattern,element=el_name, state=easy_state)
             pair_id = _make_pair_id([
                 "chem", "state", el_name, easy_state, template.id
             ])
@@ -573,11 +574,11 @@ class ChemistryGenerator(BaseGenerator):
                 continue
 
             template = self._pick_template("in_block")
-            true_stmt = template.pattern.format(element=el_name, block=true_block)
+            true_stmt = render_template(template.pattern,element=el_name, block=true_block)
 
             # Pick a wrong block
             wrong = self.rng.choice(wrong_blocks)
-            false_stmt = template.pattern.format(element=el_name, block=wrong)
+            false_stmt = render_template(template.pattern,element=el_name, block=wrong)
 
             # Difficulty: adjacent blocks are harder
             # s<->p is adjacent, d<->p is adjacent, d<->f is adjacent
@@ -630,8 +631,8 @@ class ChemistryGenerator(BaseGenerator):
                     continue
 
                 template = templates[self.rng.randint(0, len(templates) - 1)]
-                true_stmt = template.pattern.format(big=big, small=small)
-                false_stmt = template.pattern.format(big=small, small=big)
+                true_stmt = render_template(template.pattern,big=big, small=small)
+                false_stmt = render_template(template.pattern,big=small, small=big)
                 pair_id = _make_pair_id([
                     "chem", "atomnum", big, small, template.id
                 ])
@@ -685,10 +686,10 @@ class ChemistryGenerator(BaseGenerator):
                         continue
 
                     template = templates[self.rng.randint(0, len(templates) - 1)]
-                    true_stmt = template.pattern.format(
+                    true_stmt = render_template(template.pattern,
                         big=big, small=small, property=prop_label
                     )
-                    false_stmt = template.pattern.format(
+                    false_stmt = render_template(template.pattern,
                         big=small, small=big, property=prop_label
                     )
                     pair_id = _make_pair_id([

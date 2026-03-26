@@ -25,6 +25,7 @@ from latenet.generators.math_utils import (
     num_factors,
     primes_up_to,
 )
+from latenet.sanitize import render_template
 from latenet.types import ContrastivePair, Difficulty, NegationStrategy
 
 logger = logging.getLogger(__name__)
@@ -86,13 +87,13 @@ class MathTemplate:
 # Property membership
 _PROPERTY_TEMPLATES = [
     MathTemplate("math_property_01", "has_property",
-                 "{number} is {property}."),
+                 "{number} is {a_property}."),
     MathTemplate("math_property_02", "has_property",
-                 "The value {number} is {property}."),
+                 "The value {number} is {a_property}."),
     MathTemplate("math_property_03", "has_property",
-                 "The number {number} is {property}."),
+                 "The number {number} is {a_property}."),
     MathTemplate("math_property_04", "has_property",
-                 "{number} can be classified as {property}."),
+                 "{number} can be classified as {a_property}."),
 ]
 
 # Magnitude comparison
@@ -181,14 +182,14 @@ _ALL_TEMPLATES: dict[str, list[MathTemplate]] = {
 # (label_for_true, label_for_article, checker)
 # label_for_article: the form used in templates, e.g. "a prime" or "an even"
 _PROPERTIES: dict[str, tuple[str, Callable[[int], bool]]] = {
-    "prime": ("prime", is_prime),
-    "even": ("even", lambda n: n % 2 == 0),
-    "odd": ("odd", lambda n: n % 2 != 0),
-    "perfect_square": ("a perfect square", is_perfect_square),
-    "perfect_cube": ("a perfect cube", is_perfect_cube),
-    "power_of_two": ("a power of two", is_power_of_two),
-    "fibonacci": ("a Fibonacci number", is_fibonacci),
-    "perfect_number": ("a perfect number", is_perfect_number),
+    "prime": ("prime number", is_prime),
+    "even": ("even number", lambda n: n % 2 == 0),
+    "odd": ("odd number", lambda n: n % 2 != 0),
+    "perfect_square": ("perfect square", is_perfect_square),
+    "perfect_cube": ("perfect cube", is_perfect_cube),
+    "power_of_two": ("power of two", is_power_of_two),
+    "fibonacci": ("Fibonacci number", is_fibonacci),
+    "perfect_number": ("perfect number", is_perfect_number),
 }
 
 # Groups of properties for difficulty-based swapping
@@ -374,8 +375,8 @@ class MathematicsGenerator(BaseGenerator):
 
                 false_label = _PROPERTIES[false_prop][0]
                 template = self._pick_template("has_property")
-                true_stmt = template.pattern.format(number=n, property=true_label)
-                false_stmt = template.pattern.format(number=n, property=false_label)
+                true_stmt = render_template(template.pattern,number=n, property=true_label)
+                false_stmt = render_template(template.pattern,number=n, property=false_label)
 
                 pair_id = _make_pair_id([
                     "math", "property", str(n), true_prop, false_prop, template.id,
@@ -452,8 +453,8 @@ class MathematicsGenerator(BaseGenerator):
 
         def _make_pair(big: int, small_n: int, difficulty: str) -> ContrastivePair:
             template = self._pick_template("greater_than")
-            true_stmt = template.pattern.format(a=big, b=small_n)
-            false_stmt = template.pattern.format(a=small_n, b=big)
+            true_stmt = render_template(template.pattern,a=big, b=small_n)
+            false_stmt = render_template(template.pattern,a=small_n, b=big)
             pair_id = _make_pair_id(["math", "compare", str(big), str(small_n), template.id])
             return ContrastivePair(
                 true_statement=true_stmt, false_statement=false_stmt,
@@ -529,7 +530,7 @@ class MathematicsGenerator(BaseGenerator):
 
             true_d = self.rng.choice(true_divisors)
             template = self._pick_template("is_divisible_by")
-            true_stmt = template.pattern.format(a=a, b=true_d)
+            true_stmt = render_template(template.pattern,a=a, b=true_d)
 
             # Hard: false divisor close to a true divisor (off by 1)
             hard_candidates = [
@@ -556,7 +557,7 @@ class MathematicsGenerator(BaseGenerator):
                     continue
 
                 false_d = self.rng.choice(candidates)
-                false_stmt = template.pattern.format(a=a, b=false_d)
+                false_stmt = render_template(template.pattern,a=a, b=false_d)
 
                 pair_id = _make_pair_id([
                     "math", "divisible", str(a), str(true_d), str(false_d), template.id,
@@ -625,8 +626,8 @@ class MathematicsGenerator(BaseGenerator):
                         continue
 
                     template = self._pick_template("arithmetic_result", operation)
-                    true_stmt = template.pattern.format(a=a, b=b, result=result)
-                    false_stmt = template.pattern.format(a=a, b=b, result=false_result)
+                    true_stmt = render_template(template.pattern,a=a, b=b, result=result)
+                    false_stmt = render_template(template.pattern,a=a, b=b, result=false_result)
 
                     pair_id = _make_pair_id([
                         "math", "arith", operation, str(a), str(b),
@@ -683,8 +684,8 @@ class MathematicsGenerator(BaseGenerator):
 
         for a, b in hard_pairs[:60]:
             template = self._pick_template("more_factors")
-            true_stmt = template.pattern.format(a=a, b=b)
-            false_stmt = template.pattern.format(a=b, b=a)
+            true_stmt = render_template(template.pattern,a=a, b=b)
+            false_stmt = render_template(template.pattern,a=b, b=a)
             pair_id = _make_pair_id(["math", "factors", str(a), str(b), template.id])
             yield ContrastivePair(
                 true_statement=true_stmt, false_statement=false_stmt,
@@ -711,8 +712,8 @@ class MathematicsGenerator(BaseGenerator):
 
         for a, b in medium_pairs[:60]:
             template = self._pick_template("more_factors")
-            true_stmt = template.pattern.format(a=a, b=b)
-            false_stmt = template.pattern.format(a=b, b=a)
+            true_stmt = render_template(template.pattern,a=a, b=b)
+            false_stmt = render_template(template.pattern,a=b, b=a)
             pair_id = _make_pair_id(["math", "factors", str(a), str(b), template.id])
             yield ContrastivePair(
                 true_statement=true_stmt, false_statement=false_stmt,
@@ -742,8 +743,8 @@ class MathematicsGenerator(BaseGenerator):
 
         for a, b in easy_pairs[:60]:
             template = self._pick_template("more_factors")
-            true_stmt = template.pattern.format(a=a, b=b)
-            false_stmt = template.pattern.format(a=b, b=a)
+            true_stmt = render_template(template.pattern,a=a, b=b)
+            false_stmt = render_template(template.pattern,a=b, b=a)
             pair_id = _make_pair_id(["math", "factors", str(a), str(b), template.id])
             yield ContrastivePair(
                 true_statement=true_stmt, false_statement=false_stmt,
@@ -810,14 +811,14 @@ class MathematicsGenerator(BaseGenerator):
                 if share_factor:
                     template_pool = _COPRIME_TEMPLATES[:2]
                     template = template_pool[self.rng.randint(0, len(template_pool) - 1)]
-                    true_stmt = template.pattern.format(a=a, b=b)
+                    true_stmt = render_template(template.pattern, a=a, b=b)
                     false_template = _COPRIME_TEMPLATES[2]
-                    false_stmt = false_template.pattern.format(a=a, b=b)
+                    false_stmt = render_template(false_template.pattern, a=a, b=b)
                 else:
                     template = _COPRIME_TEMPLATES[2]
-                    true_stmt = template.pattern.format(a=a, b=b)
+                    true_stmt = render_template(template.pattern, a=a, b=b)
                     false_template = _COPRIME_TEMPLATES[0]
-                    false_stmt = false_template.pattern.format(a=a, b=b)
+                    false_stmt = render_template(false_template.pattern, a=a, b=b)
 
                 pair_id = _make_pair_id([
                     "math", "coprime", str(a), str(b),

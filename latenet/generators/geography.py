@@ -21,6 +21,7 @@ from latenet.generators.geo_data import (
     get_clean_countries,
     get_country_code_to_name,
 )
+from latenet.sanitize import render_template
 from latenet.types import ContrastivePair, Difficulty, NegationStrategy
 
 logger = logging.getLogger(__name__)
@@ -279,10 +280,10 @@ class GeographyGenerator(BaseGenerator):
                 continue
 
             template = templates[self.rng.randint(0, len(templates) - 1)]
-            true_stmt = template.pattern.format(city=city, country=true_country)
+            true_stmt = render_template(template.pattern,city=city, country=true_country)
 
             for swap_country, difficulty, strategy in swaps[:self.max_false_per_true]:
-                false_stmt = template.pattern.format(city=city, country=swap_country)
+                false_stmt = render_template(template.pattern,city=city, country=swap_country)
                 pair_id = _make_pair_id([
                     "geo", "contain", city, true_country, swap_country, template.id
                 ])
@@ -371,11 +372,11 @@ class GeographyGenerator(BaseGenerator):
                     if key not in pairs_seen:
                         pairs_seen.add(key)
                         template = templates[self.rng.randint(0, len(templates) - 1)]
-                        true_stmt = template.pattern.format(
+                        true_stmt = render_template(template.pattern,
                             countryA=a, countryB=b, direction=direction
                         )
                         opp = _OPPOSITE_DIRECTION[direction]
-                        false_stmt = template.pattern.format(
+                        false_stmt = render_template(template.pattern,
                             countryA=a, countryB=b, direction=opp
                         )
                         pair_id = _make_pair_id([
@@ -416,11 +417,11 @@ class GeographyGenerator(BaseGenerator):
                     if key not in pairs_seen:
                         pairs_seen.add(key)
                         template = templates[self.rng.randint(0, len(templates) - 1)]
-                        true_stmt = template.pattern.format(
+                        true_stmt = render_template(template.pattern,
                             countryA=a, countryB=b, direction=direction
                         )
                         opp = _OPPOSITE_DIRECTION[direction]
-                        false_stmt = template.pattern.format(
+                        false_stmt = render_template(template.pattern,
                             countryA=a, countryB=b, direction=opp
                         )
                         pair_id = _make_pair_id([
@@ -498,11 +499,11 @@ class GeographyGenerator(BaseGenerator):
                 continue
 
             template = templates[self.rng.randint(0, len(templates) - 1)]
-            true_stmt = template.pattern.format(
+            true_stmt = render_template(template.pattern,
                 city=anchor, near_city=near, far_city=far
             )
             # False: swap near and far
-            false_stmt = template.pattern.format(
+            false_stmt = render_template(template.pattern,
                 city=anchor, near_city=far, far_city=near
             )
             pair_id = _make_pair_id([
@@ -553,8 +554,8 @@ class GeographyGenerator(BaseGenerator):
                     continue
 
                 template = templates[self.rng.randint(0, len(templates) - 1)]
-                true_stmt = template.pattern.format(big=big, small=small)
-                false_stmt = template.pattern.format(big=small, small=big)
+                true_stmt = render_template(template.pattern,big=big, small=small)
+                false_stmt = render_template(template.pattern,big=small, small=big)
                 pair_id = _make_pair_id([
                     "geo", "pop", big, small, template.id
                 ])
@@ -602,8 +603,8 @@ class GeographyGenerator(BaseGenerator):
                     continue
 
                 template = templates[self.rng.randint(0, len(templates) - 1)]
-                true_stmt = template.pattern.format(big=big, small=small)
-                false_stmt = template.pattern.format(big=small, small=big)
+                true_stmt = render_template(template.pattern,big=big, small=small)
+                false_stmt = render_template(template.pattern,big=small, small=big)
                 pair_id = _make_pair_id([
                     "geo", "area", big, small, template.id
                 ])

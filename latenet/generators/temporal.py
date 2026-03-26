@@ -22,6 +22,7 @@ from latenet.datasources.wikidata import (
     load_notable_people,
 )
 from latenet.generators.base import BaseGenerator
+from latenet.sanitize import render_template
 from latenet.types import ContrastivePair, Difficulty, NegationStrategy
 
 logger = logging.getLogger(__name__)
@@ -293,8 +294,8 @@ class TemporalGenerator(BaseGenerator):
             qid_b = str(row_b["qid"])
 
             template = self._pick_template("happened_before")
-            true_stmt = template.pattern.format(eventA=name_a, eventB=name_b)
-            false_stmt = template.pattern.format(eventA=name_b, eventB=name_a)
+            true_stmt = render_template(template.pattern,eventA=name_a, eventB=name_b)
+            false_stmt = render_template(template.pattern,eventA=name_b, eventB=name_a)
 
             difficulty = _year_gap_difficulty(gap)
 
@@ -360,8 +361,8 @@ class TemporalGenerator(BaseGenerator):
             qid_b = str(row_b["qid"])
 
             template = self._pick_template("born_before")
-            true_stmt = template.pattern.format(personA=name_a, personB=name_b)
-            false_stmt = template.pattern.format(personA=name_b, personB=name_a)
+            true_stmt = render_template(template.pattern,personA=name_a, personB=name_b)
+            false_stmt = render_template(template.pattern,personA=name_b, personB=name_a)
 
             difficulty = _year_gap_difficulty(gap)
 
@@ -446,11 +447,11 @@ class TemporalGenerator(BaseGenerator):
                     template = self._pick_template("occurred_in_century")
 
             if entity_type == "person":
-                true_stmt = template.pattern.format(person=name, century=true_century)
-                false_stmt = template.pattern.format(person=name, century=false_century)
+                true_stmt = render_template(template.pattern,person=name, century=true_century)
+                false_stmt = render_template(template.pattern,person=name, century=false_century)
             else:
-                true_stmt = template.pattern.format(event=name, century=true_century)
-                false_stmt = template.pattern.format(event=name, century=false_century)
+                true_stmt = render_template(template.pattern,event=name, century=true_century)
+                false_stmt = render_template(template.pattern,event=name, century=false_century)
 
             century_gap = abs(century - false_century_num)
             if century_gap <= 1:
@@ -525,9 +526,9 @@ class TemporalGenerator(BaseGenerator):
             e_qid = str(event["qid"])
 
             template = self._pick_template("lived_before_event")
-            true_stmt = template.pattern.format(person=person_name, event=event_name)
+            true_stmt = render_template(template.pattern,person=person_name, event=event_name)
             # False: reverse — claim person lived before event when they actually lived after
-            false_stmt = template.pattern.format(person=event_name, event=person_name)
+            false_stmt = render_template(template.pattern,person=event_name, event=person_name)
 
             # For a cleaner false statement, swap to claim the event happened before the person
             # But templates are "person lived before event" so we need a person who lived AFTER
@@ -535,7 +536,7 @@ class TemporalGenerator(BaseGenerator):
             later_people = people[people["birth_year"] > event_year + self.min_era_gap]
             if later_people.empty:
                 # Fall back to direct negation style: flip person and event in claim
-                false_stmt = template.pattern.format(
+                false_stmt = render_template(template.pattern,
                     person=person_name, event=event_name
                 ).replace(" lived before ", " lived after ").replace(
                     " died before ", " died after "
@@ -543,7 +544,7 @@ class TemporalGenerator(BaseGenerator):
                 strategy = NegationStrategy.DIRECT_NEGATION.value
             else:
                 later_person = later_people.iloc[self.rng.randint(0, len(later_people) - 1)]
-                false_stmt = template.pattern.format(
+                false_stmt = render_template(template.pattern,
                     person=str(later_person["name"]), event=event_name,
                 )
                 strategy = NegationStrategy.DISTANT_SWAP.value
@@ -614,14 +615,14 @@ class TemporalGenerator(BaseGenerator):
                 qid_b = str(row_b["qid"])
 
                 template = self._pick_template("were_contemporaries")
-                true_stmt = template.pattern.format(personA=name_a, personB=name_b)
+                true_stmt = render_template(template.pattern,personA=name_a, personB=name_b)
 
                 # Find a non-contemporary for false statement
                 non_contemp = self._find_non_contemporary(people, row_a, indices)
                 if non_contemp is None:
                     continue
 
-                false_stmt = template.pattern.format(
+                false_stmt = render_template(template.pattern,
                     personA=name_a, personB=str(non_contemp["name"]),
                 )
 

@@ -19,12 +19,16 @@ dependencies = [
     "geopy>=2.4",
     "requests>=2.31",
     "mendeleev>=0.15",
+    "inflect>=7.0",
 ]
 
 [project.optional-dependencies]
 validation = [
     "anthropic>=0.30",
     "lmprobe>=0.8,<0.9",
+]
+grammar = [
+    "language_tool_python>=3.0",
 ]
 dev = [
     "pytest>=7.0",

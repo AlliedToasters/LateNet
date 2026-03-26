@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from latenet.sanitize import render_template as _render_template
 from latenet.types import RelationshipType
 
 
@@ -18,19 +19,19 @@ class Template:
 
 # --- Hypernymy templates ---
 _HYPERNYMY_TEMPLATES = [
-    Template("hyp_01", RelationshipType.HYPERNYMY, "{entity} is a {category}", ("entity", "category")),
-    Template("hyp_02", RelationshipType.HYPERNYMY, "A {entity} is a type of {category}", ("entity", "category")),
+    Template("hyp_01", RelationshipType.HYPERNYMY, "{entity} is {a_category}", ("entity", "category")),
+    Template("hyp_02", RelationshipType.HYPERNYMY, "{a_entity} is a type of {category}", ("entity", "category")),
     Template("hyp_03", RelationshipType.HYPERNYMY, "{entity} belongs to the category of {category}", ("entity", "category")),
     Template("hyp_04", RelationshipType.HYPERNYMY, "{entity} is a kind of {category}", ("entity", "category")),
-    Template("hyp_05", RelationshipType.HYPERNYMY, "A {entity} is an example of a {category}", ("entity", "category")),
+    Template("hyp_05", RelationshipType.HYPERNYMY, "{a_entity} is an example of {a_category}", ("entity", "category")),
 ]
 
 # --- Meronymy templates ---
 _MERONYMY_TEMPLATES = [
     Template("mer_01", RelationshipType.MERONYMY, "{part} is part of {whole}", ("part", "whole")),
-    Template("mer_02", RelationshipType.MERONYMY, "A {whole} has a {part}", ("whole", "part")),
+    Template("mer_02", RelationshipType.MERONYMY, "{a_whole} has {a_part}", ("whole", "part")),
     Template("mer_03", RelationshipType.MERONYMY, "{part} is a component of {whole}", ("part", "whole")),
-    Template("mer_04", RelationshipType.MERONYMY, "One of the parts of a {whole} is a {part}", ("whole", "part")),
+    Template("mer_04", RelationshipType.MERONYMY, "One of the parts of {a_whole} is {a_part}", ("whole", "part")),
 ]
 
 # --- Sibling templates ---
@@ -43,7 +44,7 @@ _SIBLING_TEMPLATES = [
     ),
     Template(
         "sib_02", RelationshipType.SIBLING,
-        "Like {entity_a}, {entity_b} is a {parent}",
+        "Like {entity_a}, {entity_b} is {a_parent}",
         ("entity_a", "entity_b", "parent"),
         supports_negation=False,
     ),
@@ -79,8 +80,8 @@ def get_templates(rel_type: RelationshipType) -> list[Template]:
 
 
 def render(template: Template, slot_values: dict[str, str]) -> str:
-    """Fill template slots with values."""
-    return template.pattern.format(**slot_values)
+    """Fill template slots with values, resolving {a_X} article tokens."""
+    return _render_template(template.pattern, **slot_values)
 
 
 def slot_values_for_relationship(template: Template, relationship) -> dict[str, str]:
