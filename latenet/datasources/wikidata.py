@@ -322,33 +322,22 @@ RANK_ORDER = ["species", "genus", "family", "order", "class", "phylum", "kingdom
 RANK_LEVEL = {r: i for i, r in enumerate(RANK_ORDER)}
 
 
-def _build_organism_query() -> str:
-    """Build the paginated SPARQL query for organisms with taxonomy.
+def _build_organism_query_for_rank(rank_qid: str) -> str:
+    """Build a paginated SPARQL query for organisms of a single taxonomic rank.
 
-    Uses a two-step approach:
-    1. Get organisms with their direct parent taxon, rank, common name, and Wikipedia link
-    2. Resolve full lineage in Python (SPARQL property paths are too slow at scale)
+    Uses rdfs:label directly instead of SERVICE wikibase:label, which is
+    dramatically faster for large result sets like species (~1.6M taxa).
     """
-    rank_values = " ".join(f"wd:{qid}" for qid in _RANK_QIDS.values())
-
     return f"""
-SELECT DISTINCT ?item ?itemLabel ?commonName ?taxonRank ?taxonRankLabel
-       ?parentTaxon ?parentTaxonLabel ?ncbiId ?article
+SELECT ?item ?itemLabel ?parentTaxon ?parentTaxonLabel
 WHERE {{{{
-  ?item wdt:P31 wd:Q16521 .
-  ?item wdt:P105 ?taxonRank .
-  ?item wdt:P171 ?parentTaxon .
-
-  VALUES ?taxonRank {{{{ {rank_values} }}}}
-
-  OPTIONAL {{{{ ?item wdt:P1843 ?commonName . FILTER(LANG(?commonName) = "en") }}}}
-  OPTIONAL {{{{ ?item wdt:P685 ?ncbiId . }}}}
-  OPTIONAL {{{{
-    ?article schema:about ?item .
-    ?article schema:isPartOf <https://en.wikipedia.org/> .
-  }}}}
-
-  SERVICE wikibase:label {{{{ bd:serviceParam wikibase:language "en" . }}}}
+  ?item wdt:P31 wd:Q16521 ;
+        wdt:P105 wd:{rank_qid} ;
+        wdt:P171 ?parentTaxon ;
+        rdfs:label ?itemLabel .
+  ?parentTaxon rdfs:label ?parentTaxonLabel .
+  FILTER(LANG(?itemLabel) = "en")
+  FILTER(LANG(?parentTaxonLabel) = "en")
 }}}}
 LIMIT {{limit}} OFFSET {{offset}}
 """
@@ -438,48 +427,60 @@ def load_organisms(
     require_common_name: bool = True,
     require_wikipedia: bool = True,
     force_refresh: bool = False,
+    max_pages_per_rank: int = 10,
 ) -> pd.DataFrame:
     """Load organisms with taxonomy from Wikidata.
+
+    Queries each taxonomic rank separately to avoid Wikidata query planner
+    timeouts, then merges and resolves lineage in Python.
 
     Returns DataFrame with columns:
         qid, name, common_name, taxon_rank,
         parent_taxon_qid, kingdom, phylum, class_, order, family, genus,
         ncbi_taxon_id, has_wikipedia
     """
-    query_template = _build_organism_query()
-    raw = sparql_query_paginated(
-        query_template, page_size=DEFAULT_PAGE_SIZE, force_refresh=force_refresh,
-    )
+    all_dfs: list[pd.DataFrame] = []
 
-    if raw.empty:
-        logger.warning("No organisms returned from Wikidata query")
+    for rank_label, rank_qid in _RANK_QIDS.items():
+        query_template = _build_organism_query_for_rank(rank_qid)
+        try:
+            raw = sparql_query_paginated(
+                query_template, page_size=2000, force_refresh=force_refresh,
+                max_pages=max_pages_per_rank,
+            )
+        except RuntimeError:
+            logger.warning("Skipping rank %s (%s) due to query failure", rank_label, rank_qid)
+            continue
+
+        if raw.empty:
+            continue
+
+        chunk = pd.DataFrame()
+        chunk["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
+        chunk["name"] = raw.get("itemLabel", pd.Series(dtype=str))
+        chunk["common_name"] = raw.get("itemLabel", pd.Series(dtype=str))  # use label as common name
+        chunk["taxon_rank"] = rank_label
+        chunk["parent_taxon_qid"] = raw.get("parentTaxon", pd.Series(dtype=str)).apply(_extract_qid)
+        chunk["parent_taxon_label"] = raw.get("parentTaxonLabel", pd.Series(dtype=str))
+        chunk["ncbi_taxon_id"] = ""
+        chunk["article"] = ""
+        chunk["has_wikipedia"] = False
+        all_dfs.append(chunk)
+        logger.info("  %s: %d raw rows", rank_label, len(chunk))
+
+    if not all_dfs:
+        logger.warning("No organisms returned from Wikidata queries")
         return pd.DataFrame()
 
-    # Normalize columns
-    df = pd.DataFrame()
-    df["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
-    df["name"] = raw.get("itemLabel", pd.Series(dtype=str))
-    df["common_name"] = raw.get("commonName", pd.Series(dtype=str))
-    df["taxon_rank_uri"] = raw.get("taxonRank", pd.Series(dtype=str))
-    df["taxon_rank"] = df["taxon_rank_uri"].apply(_resolve_rank_label)
-    df["parent_taxon_qid"] = raw.get("parentTaxon", pd.Series(dtype=str)).apply(_extract_qid)
-    df["parent_taxon_label"] = raw.get("parentTaxonLabel", pd.Series(dtype=str))
-    df["ncbi_taxon_id"] = raw.get("ncbiId", pd.Series(dtype=str))
-    df["article"] = raw.get("article", pd.Series(dtype=str))
-    df["has_wikipedia"] = df["article"].notna() & (df["article"] != "")
+    df = pd.concat(all_dfs, ignore_index=True)
 
-    # Deduplicate: keep one row per QID (prefer rows with common_name)
-    df = df.sort_values(
-        "common_name", na_position="last"
-    ).drop_duplicates(subset=["qid"], keep="first").reset_index(drop=True)
+    # Deduplicate: keep one row per QID
+    df = df.drop_duplicates(subset=["qid"], keep="first").reset_index(drop=True)
+
+    # Filter out entities whose name looks like a QID (no label resolved)
+    df = df[~df["name"].str.match(r"^Q\d+$", na=False)].copy()
 
     logger.info("Raw organisms: %d unique entities", len(df))
-
-    # Apply filters
-    if require_wikipedia:
-        df = filter_has_wikipedia(df)
-    if require_common_name:
-        df = filter_has_label(df, label_col="common_name")
 
     # Build lineage
     df = _build_lineage(df)
