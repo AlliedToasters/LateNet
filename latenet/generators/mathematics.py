@@ -86,9 +86,9 @@ class MathTemplate:
 # Property membership
 _PROPERTY_TEMPLATES = [
     MathTemplate("math_property_01", "has_property",
-                 "{number} is a {property}."),
+                 "{number} is {property}."),
     MathTemplate("math_property_02", "has_property",
-                 "{number} is a {property} number."),
+                 "The value {number} is {property}."),
     MathTemplate("math_property_03", "has_property",
                  "The number {number} is {property}."),
     MathTemplate("math_property_04", "has_property",
@@ -279,18 +279,26 @@ class MathematicsGenerator(BaseGenerator):
             self._generate_shares_factor,
         ]
 
-        counts_by_relation: dict[str, int] = {}
-        for gen_fn in sub_generators:
-            rel_count = 0
-            for pair in gen_fn():
+        # Round-robin across sub-generators so max_pairs doesn't starve later relations
+        iterators = [gen_fn() for gen_fn in sub_generators]
+        counts_by_relation: dict[str, int] = {fn.__name__: 0 for fn in sub_generators}
+        active = list(range(len(iterators)))
+
+        while active:
+            next_active = []
+            for idx in active:
+                try:
+                    pair = next(iterators[idx])
+                except StopIteration:
+                    continue
                 yield pair
                 count += 1
-                rel_count += 1
+                counts_by_relation[sub_generators[idx].__name__] += 1
+                next_active.append(idx)
                 if self.max_pairs is not None and count >= self.max_pairs:
-                    counts_by_relation[gen_fn.__name__] = rel_count
                     logger.info("Math generator pair counts: %s", counts_by_relation)
                     return
-            counts_by_relation[gen_fn.__name__] = rel_count
+            active = next_active
 
         logger.info(
             "Math generator produced %d total pairs. Per relation: %s",
@@ -434,58 +442,72 @@ class MathematicsGenerator(BaseGenerator):
 
     def _generate_greater_than(self) -> Iterator[ContrastivePair]:
         lo, hi = self.comparison_range
+        pairs_per_tier = 60
 
-        # Generate a pool of number pairs at each difficulty level
-        pairs_per_tier = 50
-
-        # Curate numbers: mix of small, medium, large, round and non-round
+        # Curate number pools by magnitude
         small = list(range(2, 10))
         medium = list(range(10, 100))
         large = list(range(100, 1000))
         very_large = list(range(1000, min(hi + 1, 10001)))
-        rounds = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000]
 
-        all_nums = small + medium + large + very_large + rounds
-        all_nums = sorted(set(n for n in all_nums if lo <= n <= hi))
-
-        for _ in range(pairs_per_tier * 3):
-            a = self.rng.choice(all_nums)
-            b = self.rng.choice(all_nums)
-            if a == b:
-                continue
-
-            big, small_n = max(a, b), min(a, b)
-            ratio = big / small_n
-
-            if ratio < 1.1:
-                continue  # Too close, ambiguous
-
-            if ratio < 2:
-                difficulty = Difficulty.HARD.value
-            elif ratio < 10:
-                difficulty = Difficulty.MEDIUM.value
-            else:
-                difficulty = Difficulty.EASY.value
-
+        def _make_pair(big: int, small_n: int, difficulty: str) -> ContrastivePair:
             template = self._pick_template("greater_than")
             true_stmt = template.pattern.format(a=big, b=small_n)
             false_stmt = template.pattern.format(a=small_n, b=big)
-
-            pair_id = _make_pair_id([
-                "math", "compare", str(big), str(small_n), template.id,
-            ])
-            yield ContrastivePair(
-                true_statement=true_stmt,
-                false_statement=false_stmt,
-                pair_id=pair_id,
-                domain="mathematics",
-                relation_type="greater_than",
-                difficulty=difficulty,
-                semantic_distance=None,
-                generator=self.name,
+            pair_id = _make_pair_id(["math", "compare", str(big), str(small_n), template.id])
+            return ContrastivePair(
+                true_statement=true_stmt, false_statement=false_stmt,
+                pair_id=pair_id, domain="mathematics",
+                relation_type="greater_than", difficulty=difficulty,
+                semantic_distance=None, generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
             )
+
+        # Hard tier: close numbers (ratio 1.1–2x), same magnitude
+        hard_pool = medium + large
+        self.rng.shuffle(hard_pool)
+        hard_count = 0
+        for base in hard_pool:
+            if hard_count >= pairs_per_tier:
+                break
+            # Pick a number 10-90% larger
+            offset = self.rng.randint(max(1, base // 10), max(2, base // 2))
+            other = base + offset
+            if other > hi or other == base:
+                continue
+            yield _make_pair(other, base, Difficulty.HARD.value)
+            hard_count += 1
+
+        # Medium tier: moderate ratio (2x–10x)
+        medium_bases = small + medium
+        self.rng.shuffle(medium_bases)
+        med_count = 0
+        for base in medium_bases:
+            if med_count >= pairs_per_tier:
+                break
+            multiplier = self.rng.randint(2, 9)
+            other = base * multiplier
+            if other > hi or other < lo:
+                continue
+            yield _make_pair(other, base, Difficulty.MEDIUM.value)
+            med_count += 1
+
+        # Easy tier: very different magnitudes (ratio > 10x)
+        easy_smalls = list(small)
+        easy_larges = list(large + very_large)
+        self.rng.shuffle(easy_smalls)
+        self.rng.shuffle(easy_larges)
+        easy_count = 0
+        for s in easy_smalls:
+            for lg in easy_larges:
+                if easy_count >= pairs_per_tier:
+                    break
+                if lg > 10 * s:
+                    yield _make_pair(lg, s, Difficulty.EASY.value)
+                    easy_count += 1
+            if easy_count >= pairs_per_tier:
+                break
 
     # --- 3. Divisibility ---
 
@@ -632,56 +654,105 @@ class MathematicsGenerator(BaseGenerator):
     def _generate_more_factors(self) -> Iterator[ContrastivePair]:
         lo, hi = self.property_range
 
-        # Use highly composite numbers paired with low-factor numbers
+        # Build factor-count buckets for all numbers in range
+        factor_counts: dict[int, int] = {}
+        for n in range(lo, min(hi + 1, 500)):
+            factor_counts[n] = num_factors(n)
+
+        # Group numbers by factor count for hard-tier (similar counts) pairing
+        by_count: dict[int, list[int]] = {}
+        for n, nf in factor_counts.items():
+            by_count.setdefault(nf, []).append(n)
+
+        # --- Hard tier: pair numbers with similar but different factor counts ---
+        # e.g. 4 factors vs 6 factors — the difference is subtle
+        hard_pairs: list[tuple[int, int]] = []
+        sorted_counts = sorted(by_count.keys())
+        for i in range(len(sorted_counts)):
+            for j in range(i + 1, len(sorted_counts)):
+                nf_a, nf_b = sorted_counts[i], sorted_counts[j]
+                if nf_b - nf_a > 2:
+                    break  # Only pair counts within 1-2 of each other
+                if nf_a < 3:
+                    continue  # Skip trivial (primes, etc.)
+                for a in by_count[nf_b][:5]:
+                    for b in by_count[nf_a][:5]:
+                        if a != b:
+                            hard_pairs.append((a, b))
+        self.rng.shuffle(hard_pairs)
+
+        for a, b in hard_pairs[:60]:
+            template = self._pick_template("more_factors")
+            true_stmt = template.pattern.format(a=a, b=b)
+            false_stmt = template.pattern.format(a=b, b=a)
+            pair_id = _make_pair_id(["math", "factors", str(a), str(b), template.id])
+            yield ContrastivePair(
+                true_statement=true_stmt, false_statement=false_stmt,
+                pair_id=pair_id, domain="mathematics",
+                relation_type="more_factors", difficulty=Difficulty.HARD.value,
+                semantic_distance=None, generator=self.name,
+                template_id=template.id,
+                negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+            )
+
+        # --- Medium tier: moderate factor ratio (2x-4x) ---
+        medium_pairs: list[tuple[int, int]] = []
+        mid_factor_nums = [n for n, nf in factor_counts.items() if 4 <= nf <= 8]
+        low_factor_nums = [n for n, nf in factor_counts.items() if nf == 2 or nf == 3]
+        self.rng.shuffle(mid_factor_nums)
+        self.rng.shuffle(low_factor_nums)
+        for a in mid_factor_nums[:40]:
+            for b in low_factor_nums[:20]:
+                if a != b:
+                    ratio = factor_counts[a] / factor_counts[b]
+                    if 2 <= ratio <= 4:
+                        medium_pairs.append((a, b))
+        self.rng.shuffle(medium_pairs)
+
+        for a, b in medium_pairs[:60]:
+            template = self._pick_template("more_factors")
+            true_stmt = template.pattern.format(a=a, b=b)
+            false_stmt = template.pattern.format(a=b, b=a)
+            pair_id = _make_pair_id(["math", "factors", str(a), str(b), template.id])
+            yield ContrastivePair(
+                true_statement=true_stmt, false_statement=false_stmt,
+                pair_id=pair_id, domain="mathematics",
+                relation_type="more_factors", difficulty=Difficulty.MEDIUM.value,
+                semantic_distance=None, generator=self.name,
+                template_id=template.id,
+                negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+            )
+
+        # --- Easy tier: large factor ratio (highly composite vs primes) ---
         high_factor_nums = [n for n in _HIGHLY_COMPOSITE if lo <= n <= hi]
-        # Add some more numbers with many factors
         for n in range(lo, min(hi + 1, 500)):
             if num_factors(n) >= 8:
                 high_factor_nums.append(n)
         high_factor_nums = sorted(set(high_factor_nums))
-
-        low_factor_nums = self._primes[:50]  # Primes have exactly 2 factors
-
+        prime_pool = self._primes[:50]
         self.rng.shuffle(high_factor_nums)
-        self.rng.shuffle(low_factor_nums)
+        self.rng.shuffle(prime_pool)
 
-        for big_n in high_factor_nums[:60]:
-            for small_n in low_factor_nums[:30]:
-                if big_n == small_n:
-                    continue
-                nf_big = num_factors(big_n)
-                nf_small = num_factors(small_n)
-                if nf_big <= nf_small or nf_big < 2 * nf_small:
-                    continue
+        easy_pairs: list[tuple[int, int]] = []
+        for a in high_factor_nums[:40]:
+            for b in prime_pool[:20]:
+                if a != b and factor_counts.get(a, num_factors(a)) / factor_counts.get(b, num_factors(b)) > 4:
+                    easy_pairs.append((a, b))
+        self.rng.shuffle(easy_pairs)
 
-                template = self._pick_template("more_factors")
-                true_stmt = template.pattern.format(a=big_n, b=small_n)
-                false_stmt = template.pattern.format(a=small_n, b=big_n)
-
-                # Difficulty by factor ratio
-                ratio = nf_big / nf_small
-                if ratio < 3:
-                    difficulty = Difficulty.HARD.value
-                elif ratio < 6:
-                    difficulty = Difficulty.MEDIUM.value
-                else:
-                    difficulty = Difficulty.EASY.value
-
-                pair_id = _make_pair_id([
-                    "math", "factors", str(big_n), str(small_n), template.id,
-                ])
-                yield ContrastivePair(
-                    true_statement=true_stmt,
-                    false_statement=false_stmt,
-                    pair_id=pair_id,
-                    domain="mathematics",
-                    relation_type="more_factors",
-                    difficulty=difficulty,
-                    semantic_distance=None,
-                    generator=self.name,
-                    template_id=template.id,
-                    negation_strategy=NegationStrategy.REVERSE_RELATION.value,
-                )
+        for a, b in easy_pairs[:60]:
+            template = self._pick_template("more_factors")
+            true_stmt = template.pattern.format(a=a, b=b)
+            false_stmt = template.pattern.format(a=b, b=a)
+            pair_id = _make_pair_id(["math", "factors", str(a), str(b), template.id])
+            yield ContrastivePair(
+                true_statement=true_stmt, false_statement=false_stmt,
+                pair_id=pair_id, domain="mathematics",
+                relation_type="more_factors", difficulty=Difficulty.EASY.value,
+                semantic_distance=None, generator=self.name,
+                template_id=template.id,
+                negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+            )
 
     # --- 6. Shared factor / coprime ---
 
@@ -692,40 +763,61 @@ class MathematicsGenerator(BaseGenerator):
         pool = list(range(lo, min(hi + 1, 200)))
         self.rng.shuffle(pool)
 
-        # Generate coprime pairs and shared-factor pairs
+        # Bucket candidates by difficulty tier, then yield in balanced order
+        hard_candidates: list[tuple[int, int, bool, int]] = []   # (a, b, share_factor, gcd)
+        medium_candidates: list[tuple[int, int, bool, int]] = []
+        easy_candidates: list[tuple[int, int, bool, int]] = []
+
         for i in range(len(pool)):
             for j in range(i + 1, min(i + 20, len(pool))):
                 a, b = pool[i], pool[j]
                 g = gcd(a, b)
                 share_factor = g > 1
 
-                # Template selection depends on whether they share a factor
+                # Difficulty based on how obvious the shared-factor relationship is:
+                # Hard: GCD is a small prime (2 or 3) — subtle shared factor
+                #       or coprime pair where numbers are both even-looking composites
+                # Medium: GCD is a moderate composite or mid-range prime
+                # Easy: GCD is large / obviously share a factor (e.g. both multiples of 10)
                 if share_factor:
-                    # Use templates that assert sharing
-                    template_pool = _COPRIME_TEMPLATES[:2]  # "share a common factor"
+                    if g <= 3:
+                        hard_candidates.append((a, b, share_factor, g))
+                    elif g <= 10:
+                        medium_candidates.append((a, b, share_factor, g))
+                    else:
+                        easy_candidates.append((a, b, share_factor, g))
+                else:
+                    # Coprime pairs: hard when numbers are close together (looks like they share)
+                    gap = abs(a - b)
+                    if gap <= 3:
+                        hard_candidates.append((a, b, share_factor, g))
+                    elif gap <= 15:
+                        medium_candidates.append((a, b, share_factor, g))
+                    else:
+                        easy_candidates.append((a, b, share_factor, g))
+
+        self.rng.shuffle(hard_candidates)
+        self.rng.shuffle(medium_candidates)
+        self.rng.shuffle(easy_candidates)
+
+        pairs_per_tier = 60
+        for candidates, difficulty in [
+            (hard_candidates[:pairs_per_tier], Difficulty.HARD.value),
+            (medium_candidates[:pairs_per_tier], Difficulty.MEDIUM.value),
+            (easy_candidates[:pairs_per_tier], Difficulty.EASY.value),
+        ]:
+            for a, b, share_factor, _g in candidates:
+                if share_factor:
+                    template_pool = _COPRIME_TEMPLATES[:2]
                     template = template_pool[self.rng.randint(0, len(template_pool) - 1)]
                     true_stmt = template.pattern.format(a=a, b=b)
-                    # False: negate — claim they are coprime
-                    false_template = _COPRIME_TEMPLATES[2]  # "are coprime"
+                    false_template = _COPRIME_TEMPLATES[2]
                     false_stmt = false_template.pattern.format(a=a, b=b)
-                    neg_strategy = NegationStrategy.DIRECT_NEGATION.value
                 else:
-                    # They are coprime
-                    template = _COPRIME_TEMPLATES[2]  # "are coprime"
+                    template = _COPRIME_TEMPLATES[2]
                     true_stmt = template.pattern.format(a=a, b=b)
-                    # False: claim they share a factor
                     false_template = _COPRIME_TEMPLATES[0]
                     false_stmt = false_template.pattern.format(a=a, b=b)
-                    neg_strategy = NegationStrategy.DIRECT_NEGATION.value
-
-                # Difficulty: coprime pair with small numbers close together = hard
-                diff_val = abs(a - b)
-                if diff_val <= 5:
-                    difficulty = Difficulty.HARD.value
-                elif diff_val <= 20:
-                    difficulty = Difficulty.MEDIUM.value
-                else:
-                    difficulty = Difficulty.EASY.value
 
                 pair_id = _make_pair_id([
                     "math", "coprime", str(a), str(b),
@@ -741,5 +833,5 @@ class MathematicsGenerator(BaseGenerator):
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
-                    negation_strategy=neg_strategy,
+                    negation_strategy=NegationStrategy.DIRECT_NEGATION.value,
                 )
