@@ -745,12 +745,266 @@ def load_notable_people(
     return df
 
 
-def load_authors_and_works(**kwargs) -> pd.DataFrame:
-    """Load authors and their works from Wikidata.
+# ---------------------------------------------------------------------------
+# Author-work domain configuration
+# ---------------------------------------------------------------------------
 
-    Not yet implemented — stub for authorship generator.
+# Maps creative domain -> (creator property, work types as QID->label, verb, role)
+_AUTHORSHIP_DOMAINS: dict[str, dict] = {
+    "literature": {
+        "creator_prop": "P50",
+        "work_types": {
+            "Q7725634": "novel",
+            "Q25379": "play",
+            "Q5185279": "poem",
+            "Q49084": "short story",
+            "Q35760": "essay",
+        },
+        "verb": "written",
+        "role": "author",
+    },
+    "music": {
+        "creator_prop": "P86",
+        "work_types": {
+            "Q9734": "symphony",
+            "Q1344": "opera",
+            "Q207628": "concerto",
+            "Q131746": "sonata",
+            "Q105543609": "musical composition",
+        },
+        "verb": "composed",
+        "role": "composer",
+    },
+    "art": {
+        "creator_prop": "P170",
+        "work_types": {
+            "Q3305213": "painting",
+            "Q860861": "sculpture",
+            "Q219423": "mural",
+        },
+        "verb": "painted",
+        "role": "painter",
+    },
+    "film": {
+        "creator_prop": "P57",
+        "work_types": {
+            "Q11424": "film",
+        },
+        "verb": "directed",
+        "role": "director",
+    },
+    "science": {
+        "creator_prop": "P61",
+        "work_types": {
+            "Q11348": "theorem",
+            "Q131476": "scientific theory",
+            "Q11023": "equation",
+        },
+        "verb": "proposed",
+        "role": "discoverer",
+        # Also use P138 (named after) for science
+        "named_after_prop": "P138",
+    },
+}
+
+
+def _build_author_work_query(domain: str, creator_prop: str, work_type_qids: list[str]) -> str:
+    """Build a paginated SPARQL query for author-work pairs in a creative domain.
+
+    Requires English Wikipedia articles for both author and work,
+    and filters to works with exactly one creator.
     """
-    raise NotImplementedError("Authors and works extract not yet implemented")
+    values_block = " ".join(f"wd:{qid}" for qid in work_type_qids)
+    return f"""
+SELECT DISTINCT ?work ?workLabel ?workType ?workTypeLabel
+       ?author ?authorLabel ?pubDate
+       ?authorArticle ?workArticle
+WHERE {{{{
+  VALUES ?workType {{ {values_block} }}
+  ?work wdt:P31 ?workType ;
+        wdt:{creator_prop} ?author .
+  ?work rdfs:label ?workLabel .
+  ?author rdfs:label ?authorLabel .
+  FILTER(LANG(?workLabel) = "en")
+  FILTER(LANG(?authorLabel) = "en")
+
+  # Require English Wikipedia article for both
+  ?authorArticle schema:about ?author ;
+                 schema:isPartOf <https://en.wikipedia.org/> .
+  ?workArticle schema:about ?work ;
+               schema:isPartOf <https://en.wikipedia.org/> .
+
+  OPTIONAL {{ ?work wdt:P577 ?pubDate . }}
+}}}}
+LIMIT {{limit}} OFFSET {{offset}}
+"""
+
+
+def _build_named_after_query(work_type_qids: list[str]) -> str:
+    """Build a SPARQL query for science items using P138 (named after)."""
+    values_block = " ".join(f"wd:{qid}" for qid in work_type_qids)
+    return f"""
+SELECT DISTINCT ?work ?workLabel ?workType ?workTypeLabel
+       ?author ?authorLabel ?pubDate
+       ?authorArticle ?workArticle
+WHERE {{{{
+  VALUES ?workType {{ {values_block} }}
+  ?work wdt:P31 ?workType ;
+        wdt:P138 ?author .
+  ?author wdt:P31 wd:Q5 .
+  ?work rdfs:label ?workLabel .
+  ?author rdfs:label ?authorLabel .
+  FILTER(LANG(?workLabel) = "en")
+  FILTER(LANG(?authorLabel) = "en")
+
+  ?authorArticle schema:about ?author ;
+                 schema:isPartOf <https://en.wikipedia.org/> .
+  ?workArticle schema:about ?work ;
+               schema:isPartOf <https://en.wikipedia.org/> .
+
+  OPTIONAL {{ ?work wdt:P577 ?pubDate . }}
+}}}}
+LIMIT {{limit}} OFFSET {{offset}}
+"""
+
+
+def load_authors_and_works(
+    domains: list[str] | None = None,
+    min_works_per_author: int = 2,
+    use_pageview_filter: bool = False,
+    pageview_threshold: int = 1000,
+    force_refresh: bool = False,
+) -> pd.DataFrame:
+    """Load authors/creators and their works from Wikidata.
+
+    Returns DataFrame with columns:
+        author_qid, author_name, author_occupation,
+        work_qid, work_name, work_type,
+        creative_domain (literature, music, science, art, philosophy),
+        publication_year (where available),
+        has_wikipedia_author, has_wikipedia_work
+    """
+    target_domains = domains or list(_AUTHORSHIP_DOMAINS.keys())
+    all_dfs: list[pd.DataFrame] = []
+
+    for domain_name in target_domains:
+        if domain_name not in _AUTHORSHIP_DOMAINS:
+            logger.warning("Unknown authorship domain: %s, skipping", domain_name)
+            continue
+
+        domain_cfg = _AUTHORSHIP_DOMAINS[domain_name]
+        work_type_qids = list(domain_cfg["work_types"].keys())
+        work_type_labels = domain_cfg["work_types"]
+
+        # Main creator property query
+        query_template = _build_author_work_query(
+            domain_name, domain_cfg["creator_prop"], work_type_qids,
+        )
+        try:
+            raw = sparql_query_paginated(
+                query_template, page_size=2000, force_refresh=force_refresh,
+                max_pages=10,
+            )
+        except RuntimeError:
+            logger.warning("Skipping domain %s due to query failure", domain_name)
+            raw = pd.DataFrame()
+
+        if not raw.empty:
+            chunk = _normalize_author_work_df(raw, domain_name, work_type_labels, domain_cfg)
+            all_dfs.append(chunk)
+            logger.info("  %s (creator prop): %d raw rows", domain_name, len(chunk))
+
+        # Science domain: also query named-after relationships
+        if domain_name == "science" and "named_after_prop" in domain_cfg:
+            named_query = _build_named_after_query(work_type_qids)
+            try:
+                raw_named = sparql_query_paginated(
+                    named_query, page_size=2000, force_refresh=force_refresh,
+                    max_pages=5,
+                )
+            except RuntimeError:
+                logger.warning("Skipping named-after query for science domain")
+                raw_named = pd.DataFrame()
+
+            if not raw_named.empty:
+                chunk_named = _normalize_author_work_df(
+                    raw_named, domain_name, work_type_labels, domain_cfg,
+                )
+                chunk_named["science_attribution"] = True
+                all_dfs.append(chunk_named)
+                logger.info("  %s (named after): %d raw rows", domain_name, len(chunk_named))
+
+    if not all_dfs:
+        logger.warning("No author-work pairs returned from Wikidata queries")
+        return pd.DataFrame()
+
+    df = pd.concat(all_dfs, ignore_index=True)
+
+    # Fill science_attribution for non-science rows
+    if "science_attribution" not in df.columns:
+        df["science_attribution"] = False
+    df["science_attribution"] = df["science_attribution"].fillna(False)
+
+    # Deduplicate: one row per (work_qid, author_qid) pair
+    df = df.drop_duplicates(subset=["work_qid", "author_qid"], keep="first").reset_index(drop=True)
+
+    # Filter out entries whose names look like QIDs (no label resolved)
+    df = df[~df["author_name"].str.match(r"^Q\d+$", na=False)].copy()
+    df = df[~df["work_name"].str.match(r"^Q\d+$", na=False)].copy()
+
+    logger.info("Raw author-work pairs: %d", len(df))
+
+    # Drop works with multiple creators (shared authorship)
+    # Count how many distinct authors each work has
+    author_counts = df.groupby("work_qid")["author_qid"].nunique()
+    multi_author_works = set(author_counts[author_counts > 1].index)
+    if multi_author_works:
+        before = len(df)
+        df = df[~df["work_qid"].isin(multi_author_works)].copy()
+        logger.info("Dropped %d rows for %d multi-author works",
+                     before - len(df), len(multi_author_works))
+
+    # Filter to authors with min_works_per_author
+    work_counts = df.groupby("author_qid")["work_qid"].nunique()
+    valid_authors = set(work_counts[work_counts >= min_works_per_author].index)
+    before = len(df)
+    df = df[df["author_qid"].isin(valid_authors)].copy().reset_index(drop=True)
+    logger.info("Author filter (min %d works): %d -> %d rows",
+                 min_works_per_author, before, len(df))
+
+    logger.info("Final author-work dataset: %d pairs across %d authors",
+                 len(df), df["author_qid"].nunique())
+    return df
+
+
+def _normalize_author_work_df(
+    raw: pd.DataFrame,
+    domain_name: str,
+    work_type_labels: dict[str, str],
+    domain_cfg: dict,
+) -> pd.DataFrame:
+    """Normalize raw SPARQL results into the standard author-work schema."""
+    chunk = pd.DataFrame()
+    chunk["author_qid"] = raw.get("author", pd.Series(dtype=str)).apply(_extract_qid)
+    chunk["author_name"] = raw.get("authorLabel", pd.Series(dtype=str))
+    chunk["author_occupation"] = domain_cfg["role"]
+    chunk["work_qid"] = raw.get("work", pd.Series(dtype=str)).apply(_extract_qid)
+    chunk["work_name"] = raw.get("workLabel", pd.Series(dtype=str))
+
+    # Resolve work type label from QID
+    work_type_uris = raw.get("workType", pd.Series(dtype=str))
+    chunk["work_type"] = work_type_uris.apply(
+        lambda uri: work_type_labels.get(_extract_qid(uri), "work")
+    )
+
+    chunk["creative_domain"] = domain_name
+    chunk["publication_year"] = raw.get("pubDate", pd.Series(dtype=str)).apply(_parse_year)
+    chunk["has_wikipedia_author"] = True  # required in query
+    chunk["has_wikipedia_work"] = True  # required in query
+    chunk["verb"] = domain_cfg["verb"]
+    chunk["role"] = domain_cfg["role"]
+    chunk["science_attribution"] = False
+    return chunk
 
 
 def load_translations(**kwargs) -> pd.DataFrame:

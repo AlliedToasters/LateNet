@@ -12,6 +12,7 @@ from latenet.generators.geography import GeographyGenerator
 from latenet.generators.chemistry import ChemistryGenerator
 from latenet.generators.biology import BiologyGenerator
 from latenet.generators.temporal import TemporalGenerator
+from latenet.generators.authorship import AuthorshipGenerator
 
 # Registry of all available generators
 GENERATORS: dict[str, type[BaseGenerator]] = {
@@ -20,6 +21,7 @@ GENERATORS: dict[str, type[BaseGenerator]] = {
     "chemistry": ChemistryGenerator,
     "biology": BiologyGenerator,
     "temporal": TemporalGenerator,
+    "authorship": AuthorshipGenerator,
 }
 
 
