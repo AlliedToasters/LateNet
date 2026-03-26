@@ -153,6 +153,12 @@ class TestSameRegion:
         for p in pairs:
             assert p.true_statement != p.false_statement
 
+    def test_medium_tier_present(self):
+        gen = _make_generator()
+        pairs = list(gen._generate_same_region())
+        diffs = {p.difficulty for p in pairs}
+        assert Difficulty.MEDIUM.value in diffs
+
 
 # --- Co-membership ---
 
@@ -164,6 +170,12 @@ class TestSameSystem:
         assert len(pairs) > 0
         for p in pairs:
             assert p.relation_type == "same_system"
+
+    def test_medium_tier_present(self):
+        gen = _make_generator()
+        pairs = list(gen._generate_same_system())
+        diffs = {p.difficulty for p in pairs}
+        assert Difficulty.MEDIUM.value in diffs
 
 
 # --- Determinism ---

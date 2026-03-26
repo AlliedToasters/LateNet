@@ -420,12 +420,23 @@ class AnatomyGenerator(BaseGenerator):
 
                 # Difficulty based on how close the swap region is
                 adjacent = set(ADJACENT_REGIONS.get(region, []))
+                # Medium: non-adjacent but same body half (trunk vs extremities)
+                trunk = {"thorax", "abdomen", "pelvis", "back", "neck"}
+                if region in trunk:
+                    same_half = {r for r in trunk if r != region} - adjacent
+                else:
+                    same_half = {r for r in ADJACENT_REGIONS if r not in trunk and r != region} - adjacent
 
                 hard_swaps = [s for s in other_structs if s.body_region in adjacent]
-                distant_swaps = [s for s in other_structs if s.body_region not in adjacent]
+                medium_swaps = [s for s in other_structs if s.body_region in same_half]
+                distant_swaps = [
+                    s for s in other_structs
+                    if s.body_region not in adjacent and s.body_region not in same_half
+                ]
 
                 for candidates, difficulty, strategy in [
                     (hard_swaps, Difficulty.HARD.value, NegationStrategy.SIBLING_SWAP.value),
+                    (medium_swaps, Difficulty.MEDIUM.value, NegationStrategy.SIBLING_SWAP.value),
                     (distant_swaps, Difficulty.EASY.value, NegationStrategy.DISTANT_SWAP.value),
                 ]:
                     if not candidates:
@@ -489,12 +500,26 @@ class AnatomyGenerator(BaseGenerator):
                     continue
 
                 related = set(RELATED_SYSTEMS.get(system, []))
+                # Medium: systems that share a body region but aren't functionally related
+                system_regions = {s.body_region for s in system_groups[system]}
+                co_regional_systems = {
+                    s.body_system for s in self._system_eligible
+                    if s.body_system != system and s.body_region in system_regions
+                } - related
 
                 hard_swaps = [s for s in other_structs if s.body_system in related]
-                distant_swaps = [s for s in other_structs if s.body_system not in related]
+                medium_swaps = [
+                    s for s in other_structs
+                    if s.body_system in co_regional_systems and s.body_system not in related
+                ]
+                distant_swaps = [
+                    s for s in other_structs
+                    if s.body_system not in related and s.body_system not in co_regional_systems
+                ]
 
                 for candidates, difficulty, strategy in [
                     (hard_swaps, Difficulty.HARD.value, NegationStrategy.SIBLING_SWAP.value),
+                    (medium_swaps, Difficulty.MEDIUM.value, NegationStrategy.SIBLING_SWAP.value),
                     (distant_swaps, Difficulty.EASY.value, NegationStrategy.DISTANT_SWAP.value),
                 ]:
                     if not candidates:
