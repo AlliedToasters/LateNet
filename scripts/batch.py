@@ -56,6 +56,11 @@ def main():
         "--skip-validation", action="store_true",
         help="Generate only, no validation. Useful for testing generators.",
     )
+    parser.add_argument(
+        "--validate-per-stratum", type=int, default=None,
+        help="Only validate N pairs per (generator, difficulty) stratum. "
+             "Generates all pairs but samples down before validation to save API costs.",
+    )
     args = parser.parse_args()
 
     legs = set(args.legs)
@@ -115,7 +120,28 @@ def main():
     # --- 3. Stamp provenance ---
     candidates_df = stamp_provenance(candidates_df, seed=args.seed)
 
-    # --- 4. Validate (unless --skip-validation) ---
+    # --- 4. Sample down to validate-per-stratum if requested ---
+    if args.validate_per_stratum is not None and not args.skip_validation:
+        n = args.validate_per_stratum
+        # Sample N pair_ids per (generator, difficulty) stratum
+        pair_meta = candidates_df.groupby("pair_id").first()[["generator", "difficulty"]].reset_index()
+        sampled_ids: list[str] = []
+        for (gen, diff), group in pair_meta.groupby(["generator", "difficulty"]):
+            selected = group.sample(n=min(n, len(group)), random_state=args.seed)
+            sampled_ids.extend(selected["pair_id"].tolist())
+            logger.info(
+                "  validate sample %s/%s: %d of %d pairs",
+                gen, diff or "(none)", len(selected), len(group),
+            )
+        # Keep the unsampled rows for the ledger (unvalidated)
+        unvalidated_df = candidates_df[~candidates_df["pair_id"].isin(sampled_ids)].copy()
+        candidates_df = candidates_df[candidates_df["pair_id"].isin(sampled_ids)].copy()
+        logger.info(
+            "Sampled %d rows (%d pairs) for validation, %d rows deferred",
+            len(candidates_df), len(sampled_ids), len(unvalidated_df),
+        )
+
+    # --- 5. Validate (unless --skip-validation) ---
     if args.skip_validation:
         logger.info("Skipping validation (--skip-validation)")
         validated = candidates_df
@@ -132,18 +158,43 @@ def main():
         ndif_verdicts = None
         anthropic_verdicts = None
 
-        if "ndif" in legs:
-            logger.info("=== NDIF / Llama 405B leg ===")
-            ndif_verdicts = run_ndif_leg(candidates_df, checkpoint_dir=checkpoint_dir)
+        run_ndif = "ndif" in legs
+        run_anthropic = "anthropic" in legs
 
-        if "anthropic" in legs:
-            logger.info("=== Anthropic (Sonnet + Opus escalation) leg ===")
-            anthropic_verdicts = run_anthropic_leg(candidates_df, checkpoint_dir=checkpoint_dir)
+        if run_ndif and run_anthropic:
+            # Run both legs in parallel — they're independent I/O-bound calls
+            # with separate checkpoint files and independent rate limits.
+            from concurrent.futures import ThreadPoolExecutor, Future
+
+            logger.info("=== Running NDIF + Anthropic legs in parallel ===")
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                ndif_future: Future = pool.submit(
+                    run_ndif_leg, candidates_df, checkpoint_dir=checkpoint_dir,
+                )
+                anthropic_future: Future = pool.submit(
+                    run_anthropic_leg, candidates_df, checkpoint_dir=checkpoint_dir,
+                )
+                ndif_verdicts = ndif_future.result()
+                anthropic_verdicts = anthropic_future.result()
+        else:
+            if run_ndif:
+                logger.info("=== NDIF / Llama 405B leg ===")
+                ndif_verdicts = run_ndif_leg(candidates_df, checkpoint_dir=checkpoint_dir)
+
+            if run_anthropic:
+                logger.info("=== Anthropic (Sonnet + Opus escalation) leg ===")
+                anthropic_verdicts = run_anthropic_leg(candidates_df, checkpoint_dir=checkpoint_dir)
 
         validated = merge_verdicts(candidates_df, ndif_verdicts, anthropic_verdicts)
 
-    # --- 5. Append to ledger ---
+    # --- 6. Append to ledger ---
+    # Append validated rows
     ledger = append_to_ledger(validated, ledger_dir=ledger_dir)
+    # Also append unvalidated rows if we sampled down
+    if args.validate_per_stratum is not None and not args.skip_validation:
+        if len(unvalidated_df) > 0:
+            logger.info("Appending %d unvalidated rows to ledger", len(unvalidated_df))
+            ledger = append_to_ledger(unvalidated_df, ledger_dir=ledger_dir)
 
     # --- 6. Summary ---
     if "contested" in validated.columns:
