@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+from collections import defaultdict
 from collections.abc import Iterator
 
-from latenet.types import ContrastivePair, Difficulty, RelationshipType
+from latenet.types import ContrastivePair, Difficulty, Relationship, RelationshipType
+
 from latenet.generators.base import BaseGenerator
 from latenet.wordnet.walker import WalkerConfig, WordNetWalker
 from latenet.wordnet.distance import semantic_distance
 from latenet.templates.templates import get_templates, render, slot_values_for_relationship
 from latenet.negation.strategies import apply_negation
+
+logger = logging.getLogger(__name__)
 
 
 class WordNetGenerator(BaseGenerator):
@@ -42,6 +47,47 @@ class WordNetGenerator(BaseGenerator):
         # Domains are discovered dynamically during generation
         return []
 
+    def _pairs_from_relationship(self, rel: Relationship) -> Iterator[ContrastivePair]:
+        """Yield all contrastive pairs for a single relationship."""
+        templates = get_templates(rel.rel_type)
+        for template in templates:
+            slots = slot_values_for_relationship(template, rel)
+            true_statement = render(template, slots)
+
+            negations = apply_negation(rel, template, true_statement, self.rng)
+            if len(negations) > self.max_false_per_true:
+                negations = negations[: self.max_false_per_true]
+
+            if not negations:
+                continue
+
+            for i, (false_stmt, strategy, neg_synset) in enumerate(negations):
+                if neg_synset is not None:
+                    dist = semantic_distance(rel.target, neg_synset)
+                else:
+                    dist = 0
+
+                pair_id = _make_pair_id(
+                    rel.source.name(), rel.target.name(),
+                    template.id, strategy.value, i,
+                )
+
+                yield ContrastivePair(
+                    true_statement=true_statement,
+                    false_statement=false_stmt,
+                    pair_id=pair_id,
+                    domain=rel.domain,
+                    relation_type=rel.rel_type.value,
+                    difficulty=_difficulty_for_distance(dist),
+                    semantic_distance=dist,
+                    generator=self.name,
+                    template_id=template.id,
+                    negation_strategy=strategy.value,
+                    source_synset=rel.source.name(),
+                    target_synset=rel.target.name(),
+                    neg_synset=neg_synset.name() if neg_synset else None,
+                )
+
     def generate(self) -> Iterator[ContrastivePair]:
         """Walk WordNet and yield contrastive pairs."""
         walker_config = WalkerConfig(
@@ -53,51 +99,43 @@ class WordNetGenerator(BaseGenerator):
         walker = WordNetWalker(walker_config)
         relationships = walker.walk()
 
-        count = 0
+        # Group relationships by type for round-robin generation
+        by_type: dict[RelationshipType, list[Relationship]] = defaultdict(list)
         for rel in relationships:
-            templates = get_templates(rel.rel_type)
-            for template in templates:
-                slots = slot_values_for_relationship(template, rel)
-                true_statement = render(template, slots)
+            by_type[rel.rel_type].append(rel)
 
-                negations = apply_negation(rel, template, true_statement, self.rng)
-                if len(negations) > self.max_false_per_true:
-                    negations = negations[: self.max_false_per_true]
+        # Create an iterator of pairs per relationship type
+        def _iter_for_type(rels: list[Relationship]) -> Iterator[ContrastivePair]:
+            for rel in rels:
+                yield from self._pairs_from_relationship(rel)
 
-                if not negations:
+        rel_types = list(by_type.keys())
+        iterators = [_iter_for_type(by_type[rt]) for rt in rel_types]
+        counts_by_type: dict[str, int] = {rt.value: 0 for rt in rel_types}
+        active = list(range(len(iterators)))
+        count = 0
+
+        # Round-robin across relationship types so max_pairs doesn't starve later types
+        while active:
+            next_active = []
+            for idx in active:
+                try:
+                    pair = next(iterators[idx])
+                except StopIteration:
                     continue
+                yield pair
+                count += 1
+                counts_by_type[rel_types[idx].value] += 1
+                next_active.append(idx)
+                if self.max_pairs is not None and count >= self.max_pairs:
+                    logger.info("WordNet generator pair counts: %s", counts_by_type)
+                    return
+            active = next_active
 
-                for i, (false_stmt, strategy, neg_synset) in enumerate(negations):
-                    if neg_synset is not None:
-                        dist = semantic_distance(rel.target, neg_synset)
-                    else:
-                        dist = 0
-
-                    pair_id = _make_pair_id(
-                        rel.source.name(), rel.target.name(),
-                        template.id, strategy.value, i,
-                    )
-
-                    pair = ContrastivePair(
-                        true_statement=true_statement,
-                        false_statement=false_stmt,
-                        pair_id=pair_id,
-                        domain=rel.domain,
-                        relation_type=rel.rel_type.value,
-                        difficulty=_difficulty_for_distance(dist),
-                        semantic_distance=dist,
-                        generator=self.name,
-                        template_id=template.id,
-                        negation_strategy=strategy.value,
-                        source_synset=rel.source.name(),
-                        target_synset=rel.target.name(),
-                        neg_synset=neg_synset.name() if neg_synset else None,
-                    )
-                    yield pair
-
-                    count += 1
-                    if self.max_pairs is not None and count >= self.max_pairs:
-                        return
+        logger.info(
+            "WordNet generator produced %d total pairs. Per type: %s",
+            count, counts_by_type,
+        )
 
 
 def _make_pair_id(

@@ -169,16 +169,31 @@ class AnatomyGenerator(BaseGenerator):
             self._generate_same_region,
             self._generate_same_system,
         ]
-        counts_by_relation: dict[str, int] = {}
-        for gen_fn in generators:
-            for pair in gen_fn():
-                counts_by_relation[pair.relation_type] = counts_by_relation.get(pair.relation_type, 0) + 1
+        # Round-robin across sub-generators so max_pairs doesn't starve later relations
+        iterators = [gen_fn() for gen_fn in generators]
+        counts_by_relation: dict[str, int] = {fn.__name__: 0 for fn in generators}
+        active = list(range(len(iterators)))
+
+        while active:
+            next_active = []
+            for idx in active:
+                try:
+                    pair = next(iterators[idx])
+                except StopIteration:
+                    continue
                 yield pair
                 count += 1
+                counts_by_relation[generators[idx].__name__] += 1
+                next_active.append(idx)
                 if self.max_pairs is not None and count >= self.max_pairs:
-                    logger.info("Anatomy pair counts: %s", counts_by_relation)
+                    logger.info("Anatomy generator pair counts: %s", counts_by_relation)
                     return
-        logger.info("Anatomy pair counts: %s", counts_by_relation)
+            active = next_active
+
+        logger.info(
+            "Anatomy generator produced %d total pairs. Per relation: %s",
+            count, counts_by_relation,
+        )
 
     # --- Helpers ---
 

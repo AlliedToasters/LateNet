@@ -216,12 +216,31 @@ class GeographyGenerator(BaseGenerator):
             self._generate_area,
         ]
 
-        for gen_fn in generators:
-            for pair in gen_fn():
+        # Round-robin across sub-generators so max_pairs doesn't starve later relations
+        iterators = [gen_fn() for gen_fn in generators]
+        counts_by_relation: dict[str, int] = {fn.__name__: 0 for fn in generators}
+        active = list(range(len(iterators)))
+
+        while active:
+            next_active = []
+            for idx in active:
+                try:
+                    pair = next(iterators[idx])
+                except StopIteration:
+                    continue
                 yield pair
                 count += 1
+                counts_by_relation[generators[idx].__name__] += 1
+                next_active.append(idx)
                 if self.max_pairs is not None and count >= self.max_pairs:
+                    logger.info("Geography generator pair counts: %s", counts_by_relation)
                     return
+            active = next_active
+
+        logger.info(
+            "Geography generator produced %d total pairs. Per relation: %s",
+            count, counts_by_relation,
+        )
 
     # --- Containment ---
 
