@@ -19,6 +19,10 @@ latenet-generate --generators wordnet --max-depth 3 --output small.parquet
 latenet-validate --input candidates.parquet --output validated.parquet
 latenet-export --input validated.parquet --output latenet_v1.parquet
 latenet-stats --input candidates.parquet
+
+# Build a balanced, validated dataset (the main data product)
+latenet-build --rows-per-stratum 50 --output latenet_v1.parquet
+latenet-build --rows-per-stratum 10 --generators biology temporal --legs anthropic
 ```
 
 ## Dependencies
@@ -39,7 +43,7 @@ Download WordNet data: `python -c "import nltk; nltk.download('wordnet')"`
 - **templates/** — Statement templates per relation type (`templates.py`), template diversity (`diversity.py`)
 - **negation/** — False statement strategies (`strategies.py`)
 - **difficulty/** — Difficulty tiers and semantic distance scoring (`tiers.py`)
-- **validation/** — LLM ensemble voting (`voting.py`), dispute escalation (`escalation.py`), quality filters (`filters.py`)
+- **validation/** — LLM ensemble voting (`voting.py`), dispute escalation (`escalation.py`), quality filters (`filters.py`), stratified build loop (`stratified.py`)
 - **io/** — Parquet export with standardized schema (`export.py`)
 
 ### Generator contract
@@ -52,7 +56,7 @@ All generators subclass `BaseGenerator` and implement:
 
 ### CLI scripts: `scripts/`
 
-Entry points defined in `pyproject.toml`: `latenet-generate`, `latenet-validate`, `latenet-export`, `latenet-stats`.
+Entry points defined in `pyproject.toml`: `latenet-generate`, `latenet-validate`, `latenet-build`, `latenet-export`, `latenet-stats`.
 
 ## Key Design Decisions
 
@@ -60,7 +64,8 @@ Entry points defined in `pyproject.toml`: `latenet-generate`, `latenet-validate`
 - **Generation is cheap, validation is expensive** — they run as separate stages. Never couple them
 - **Incremental by design** — generate a batch, validate it, append. Don't require full regeneration
 - **Difficulty is semantic distance** — hard=sibling swap, medium=cousin swap, easy=distant subtree
-- **Validation uses ensemble voting** — Llama 405B + Sonnet vote, Opus breaks ties on disagreement
+- **Validation uses ensemble voting** — Llama 405B (logit-level via NDIF/lmprobe) + Sonnet vote, Opus escalation on Sonnet disagreements only
+- **Stratified build loop** — `latenet-build` generates, validates, and loops until per-(generator, difficulty) quotas are met. Only rows where *both* validators agree with GT are accepted. Disputes go to a sidecar file for analysis. Each round uses `seed + round * 1000` for new candidates
 - **Adding a new generator** — subclass BaseGenerator, implement the contract, register in `scripts/generate.py` GENERATORS dict
 
 ## Code Conventions

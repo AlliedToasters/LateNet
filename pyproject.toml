@@ -24,7 +24,7 @@ dependencies = [
 [project.optional-dependencies]
 validation = [
     "anthropic>=0.30",
-    "openai>=1.0",
+    "lmprobe>=0.8,<0.9",
 ]
 dev = [
     "pytest>=7.0",
@@ -37,6 +37,7 @@ latenet-validate = "scripts.validate:main"
 latenet-export = "scripts.export:main"
 latenet-stats = "scripts.stats:main"
 latenet-qa = "scripts.qa_sample:main"
+latenet-build = "scripts.build_dataset:main"
 
 [project.urls]
 Repository = "https://github.com/AlliedToasters/LateNet"
