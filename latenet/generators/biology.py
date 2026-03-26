@@ -138,6 +138,7 @@ class BiologyGenerator(BaseGenerator):
         min_per_family: int = 2,
         min_per_order: int = 2,
         force_refresh: bool = False,
+        min_sitelinks: int = 10,
     ):
         super().__init__(seed=seed, max_pairs=max_pairs)
         self.require_common_name = require_common_name
@@ -145,6 +146,7 @@ class BiologyGenerator(BaseGenerator):
         self.min_per_family = min_per_family
         self.min_per_order = min_per_order
         self.force_refresh = force_refresh
+        self.min_sitelinks = min_sitelinks
 
         # Loaded lazily
         self._organisms: pd.DataFrame | None = None
@@ -173,6 +175,7 @@ class BiologyGenerator(BaseGenerator):
             require_common_name=self.require_common_name,
             require_wikipedia=self.require_wikipedia,
             force_refresh=self.force_refresh,
+            min_sitelinks=self.min_sitelinks,
         )
 
         if df.empty:

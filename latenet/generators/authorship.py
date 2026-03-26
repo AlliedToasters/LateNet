@@ -113,11 +113,15 @@ class AuthorshipGenerator(BaseGenerator):
         min_works_per_author: int = 2,
         per_domain_cap: int | None = None,
         force_refresh: bool = False,
+        min_work_sitelinks: int = 5,
+        min_author_sitelinks: int = 15,
     ):
         super().__init__(seed=seed, max_pairs=max_pairs)
         self.min_works_per_author = min_works_per_author
         self.per_domain_cap = per_domain_cap
         self.force_refresh = force_refresh
+        self.min_work_sitelinks = min_work_sitelinks
+        self.min_author_sitelinks = min_author_sitelinks
 
         # Loaded lazily
         self._data: pd.DataFrame | None = None
@@ -144,6 +148,8 @@ class AuthorshipGenerator(BaseGenerator):
         df = load_authors_and_works(
             min_works_per_author=self.min_works_per_author,
             force_refresh=self.force_refresh,
+            min_work_sitelinks=self.min_work_sitelinks,
+            min_author_sitelinks=self.min_author_sitelinks,
         )
 
         if df.empty:

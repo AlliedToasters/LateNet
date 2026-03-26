@@ -18,6 +18,16 @@ from latenet.negation.strategies import apply_negation
 logger = logging.getLogger(__name__)
 
 
+def _max_lemma_count(synset) -> int:
+    """Return the maximum lemma frequency count for any lemma in a synset."""
+    return max((lemma.count() for lemma in synset.lemmas()), default=0)
+
+
+def _synset_is_attested(synset) -> bool:
+    """True if any lemma in the synset has a non-zero frequency count."""
+    return _max_lemma_count(synset) > 0
+
+
 class WordNetGenerator(BaseGenerator):
     """Generate contrastive pairs from WordNet's noun hierarchy."""
 
@@ -29,12 +39,14 @@ class WordNetGenerator(BaseGenerator):
         min_examples_per_domain: int = 5,
         rel_types: set[RelationshipType] | None = None,
         max_false_per_true: int = 3,
+        min_lemma_frequency: int = 0,
     ):
         super().__init__(seed=seed, max_pairs=max_pairs)
         self.max_depth = max_depth
         self.min_examples_per_domain = min_examples_per_domain
         self.rel_types = rel_types
         self.max_false_per_true = max_false_per_true
+        self.min_lemma_frequency = min_lemma_frequency
 
     @property
     def name(self) -> str:
@@ -47,8 +59,34 @@ class WordNetGenerator(BaseGenerator):
         # Domains are discovered dynamically during generation
         return []
 
+    def _should_skip_synset(self, synset, difficulty: str) -> bool:
+        """Check if a synset should be skipped based on frequency filtering.
+
+        Soft filter: synsets with all zero-count lemmas are only usable for
+        easy tier (where the model is more likely to get it right even with
+        weak representations).
+
+        Hard filter: if min_lemma_frequency > 0, synsets below that threshold
+        are always skipped.
+        """
+        max_count = _max_lemma_count(synset)
+        # Hard cutoff
+        if self.min_lemma_frequency > 0 and max_count < self.min_lemma_frequency:
+            return True
+        # Soft filter: unattested synsets only allowed for easy tier
+        if max_count == 0 and difficulty != Difficulty.EASY.value:
+            return True
+        return False
+
     def _pairs_from_relationship(self, rel: Relationship) -> Iterator[ContrastivePair]:
         """Yield all contrastive pairs for a single relationship."""
+        # Pre-check source and target synset attestation for logging
+        if not _synset_is_attested(rel.source) and not _synset_is_attested(rel.target):
+            logger.debug(
+                "Unattested synsets: %s, %s — restricting to easy tier",
+                rel.source.name(), rel.target.name(),
+            )
+
         templates = get_templates(rel.rel_type)
         for template in templates:
             slots = slot_values_for_relationship(template, rel)
@@ -67,6 +105,17 @@ class WordNetGenerator(BaseGenerator):
                 else:
                     dist = 0
 
+                difficulty = _difficulty_for_distance(dist)
+
+                # Frequency-based soft filter: skip unattested synsets
+                # for non-easy tiers
+                if self._should_skip_synset(rel.source, difficulty):
+                    continue
+                if self._should_skip_synset(rel.target, difficulty):
+                    continue
+                if neg_synset is not None and self._should_skip_synset(neg_synset, difficulty):
+                    continue
+
                 pair_id = _make_pair_id(
                     rel.source.name(), rel.target.name(),
                     template.id, strategy.value, i,
@@ -78,7 +127,7 @@ class WordNetGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain=rel.domain,
                     relation_type=rel.rel_type.value,
-                    difficulty=_difficulty_for_distance(dist),
+                    difficulty=difficulty,
                     semantic_distance=dist,
                     generator=self.name,
                     template_id=template.id,
