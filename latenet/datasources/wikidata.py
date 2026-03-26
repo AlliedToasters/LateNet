@@ -820,7 +820,7 @@ SELECT DISTINCT ?work ?workLabel ?workType ?workTypeLabel
        ?author ?authorLabel ?pubDate
        ?authorArticle ?workArticle
 WHERE {{{{
-  VALUES ?workType {{ {values_block} }}
+  VALUES ?workType {{{{{ values_block } }}}}
   ?work wdt:P31 ?workType ;
         wdt:{creator_prop} ?author .
   ?work rdfs:label ?workLabel .
@@ -828,13 +828,12 @@ WHERE {{{{
   FILTER(LANG(?workLabel) = "en")
   FILTER(LANG(?authorLabel) = "en")
 
-  # Require English Wikipedia article for both
   ?authorArticle schema:about ?author ;
                  schema:isPartOf <https://en.wikipedia.org/> .
   ?workArticle schema:about ?work ;
                schema:isPartOf <https://en.wikipedia.org/> .
 
-  OPTIONAL {{ ?work wdt:P577 ?pubDate . }}
+  OPTIONAL {{{{ ?work wdt:P577 ?pubDate . }}}}
 }}}}
 LIMIT {{limit}} OFFSET {{offset}}
 """
@@ -848,7 +847,7 @@ SELECT DISTINCT ?work ?workLabel ?workType ?workTypeLabel
        ?author ?authorLabel ?pubDate
        ?authorArticle ?workArticle
 WHERE {{{{
-  VALUES ?workType {{ {values_block} }}
+  VALUES ?workType {{{{{ values_block } }}}}
   ?work wdt:P31 ?workType ;
         wdt:P138 ?author .
   ?author wdt:P31 wd:Q5 .
@@ -862,7 +861,7 @@ WHERE {{{{
   ?workArticle schema:about ?work ;
                schema:isPartOf <https://en.wikipedia.org/> .
 
-  OPTIONAL {{ ?work wdt:P577 ?pubDate . }}
+  OPTIONAL {{{{ ?work wdt:P577 ?pubDate . }}}}
 }}}}
 LIMIT {{limit}} OFFSET {{offset}}
 """
