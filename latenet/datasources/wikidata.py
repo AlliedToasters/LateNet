@@ -322,12 +322,18 @@ RANK_ORDER = ["species", "genus", "family", "order", "class", "phylum", "kingdom
 RANK_LEVEL = {r: i for i, r in enumerate(RANK_ORDER)}
 
 
-def _build_organism_query_for_rank(rank_qid: str) -> str:
+def _build_organism_query_for_rank(rank_qid: str, min_sitelinks: int = 0) -> str:
     """Build a paginated SPARQL query for organisms of a single taxonomic rank.
 
     Uses rdfs:label directly instead of SERVICE wikibase:label, which is
     dramatically faster for large result sets like species (~1.6M taxa).
     """
+    sitelink_clause = ""
+    if min_sitelinks > 0:
+        sitelink_clause = f"""
+  ?item wikibase:sitelinks ?sitelinks .
+  FILTER(?sitelinks >= {min_sitelinks})"""
+
     return f"""
 SELECT ?item ?itemLabel ?parentTaxon ?parentTaxonLabel
 WHERE {{{{
@@ -337,7 +343,7 @@ WHERE {{{{
         rdfs:label ?itemLabel .
   ?parentTaxon rdfs:label ?parentTaxonLabel .
   FILTER(LANG(?itemLabel) = "en")
-  FILTER(LANG(?parentTaxonLabel) = "en")
+  FILTER(LANG(?parentTaxonLabel) = "en"){sitelink_clause}
 }}}}
 LIMIT {{limit}} OFFSET {{offset}}
 """
@@ -428,6 +434,7 @@ def load_organisms(
     require_wikipedia: bool = True,
     force_refresh: bool = False,
     max_pages_per_rank: int = 10,
+    min_sitelinks: int = 10,
 ) -> pd.DataFrame:
     """Load organisms with taxonomy from Wikidata.
 
@@ -442,7 +449,7 @@ def load_organisms(
     all_dfs: list[pd.DataFrame] = []
 
     for rank_label, rank_qid in _RANK_QIDS.items():
-        query_template = _build_organism_query_for_rank(rank_qid)
+        query_template = _build_organism_query_for_rank(rank_qid, min_sitelinks=min_sitelinks)
         try:
             raw = sparql_query_paginated(
                 query_template, page_size=2000, force_refresh=force_refresh,
@@ -489,36 +496,69 @@ def load_organisms(
     return df
 
 
-def _build_event_query() -> str:
+# Event types available for temporal queries: QID -> label
+_EVENT_TYPES: dict[str, str] = {
+    "Q198": "war",
+    "Q178561": "battle",
+    "Q131569": "treaty",
+    "Q10931": "revolution",
+    "Q39546": "invention",
+    "Q3024240": "historical event",
+    "Q2001676": "skirmish",
+    "Q12017920": "military operation",
+}
+
+# Default event types to exclude — individual battles and skirmishes produce
+# statements too obscure for LLM validators (79% dispute rate).
+DEFAULT_EXCLUDE_EVENT_TYPES: frozenset[str] = frozenset({
+    "Q178561",   # battle
+    "Q2001676",  # skirmish
+    "Q12017920", # military operation
+})
+
+
+def _build_event_query(
+    exclude_event_types: frozenset[str] = DEFAULT_EXCLUDE_EVENT_TYPES,
+    min_sitelinks: int = 0,
+) -> str:
     """Build the paginated SPARQL query for historical events with dates.
 
     Uses direct P31 (instance-of) only — no transitive subclass traversal
     to keep query fast.  Date precision is filtered in Python.
-    Queries each event type separately and combines results to avoid
-    Wikidata query planner timeouts with large VALUES blocks.
-    """
-    return """
-SELECT DISTINCT ?item ?itemLabel ?itemDescription ?date ?eventType ?eventTypeLabel ?article
-WHERE {{
-  VALUES ?eventType {{
-    wd:Q198      # war
-    wd:Q178561   # battle
-    wd:Q131569   # treaty
-    wd:Q10931    # revolution
-    wd:Q39546    # invention
-    wd:Q3024240  # historical event
-  }}
-  ?item wdt:P31 ?eventType .
-  ?item wdt:P585 ?date .
 
-  OPTIONAL {{
+    Parameters
+    ----------
+    exclude_event_types
+        Wikidata QIDs to exclude from the event type VALUES block.
+        Defaults to battles and skirmishes.
+    min_sitelinks
+        Minimum sitelink count for an entity to be included. 0 disables.
+    """
+    included = {qid for qid in _EVENT_TYPES if qid not in exclude_event_types}
+    values_block = "\n    ".join(f"wd:{qid}  # {_EVENT_TYPES[qid]}" for qid in sorted(included))
+    sitelink_clause = ""
+    if min_sitelinks > 0:
+        sitelink_clause = f"""
+  ?item wikibase:sitelinks ?sitelinks .
+  FILTER(?sitelinks >= {min_sitelinks})"""
+
+    return f"""
+SELECT DISTINCT ?item ?itemLabel ?itemDescription ?date ?eventType ?eventTypeLabel ?article
+WHERE {{{{
+  VALUES ?eventType {{{{
+    {values_block}
+  }}}}
+  ?item wdt:P31 ?eventType .
+  ?item wdt:P585 ?date .{sitelink_clause}
+
+  OPTIONAL {{{{
     ?article schema:about ?item .
     ?article schema:isPartOf <https://en.wikipedia.org/> .
-  }}
+  }}}}
 
-  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
-}}
-LIMIT {limit} OFFSET {offset}
+  SERVICE wikibase:label {{{{ bd:serviceParam wikibase:language "en" . }}}}
+}}}}
+LIMIT {{limit}} OFFSET {{offset}}
 """
 
 
@@ -536,16 +576,25 @@ _PEOPLE_OCCUPATIONS: dict[str, str] = {
 }
 
 
-def _build_people_query_for_occupation(occupation_qid: str) -> str:
+def _build_people_query_for_occupation(
+    occupation_qid: str,
+    min_sitelinks: int = 0,
+) -> str:
     """Build a people query for a single occupation.
 
     Querying one occupation at a time avoids Wikidata query planner timeouts.
     """
+    sitelink_clause = ""
+    if min_sitelinks > 0:
+        sitelink_clause = f"""
+  ?item wikibase:sitelinks ?sitelinks .
+  FILTER(?sitelinks >= {min_sitelinks})"""
+
     return f"""
 SELECT ?item ?itemLabel ?birthDate ?deathDate
 WHERE {{{{
   ?item wdt:P106 wd:{occupation_qid} ;
-        wdt:P569 ?birthDate .
+        wdt:P569 ?birthDate .{sitelink_clause}
   OPTIONAL {{{{ ?item wdt:P570 ?deathDate . }}}}
   SERVICE wikibase:label {{{{ bd:serviceParam wikibase:language "en" . }}}}
 }}}}
@@ -610,14 +659,29 @@ def load_historical_events(
     require_precise_date: bool = True,
     require_wikipedia: bool = True,
     force_refresh: bool = False,
+    exclude_event_types: frozenset[str] = DEFAULT_EXCLUDE_EVENT_TYPES,
+    min_sitelinks: int = 10,
 ) -> pd.DataFrame:
     """Load historical events with dates from Wikidata.
+
+    Parameters
+    ----------
+    exclude_event_types
+        Wikidata QIDs to exclude from the event type VALUES block.
+        Defaults to battles and skirmishes.
+    min_sitelinks
+        Minimum number of Wikipedia sitelinks for an event to be included.
+        Entities with articles in fewer language editions are likely too
+        obscure for LLM validators.  Default 10.
 
     Returns DataFrame with columns:
         qid, name, description, date, year, century,
         event_type, has_wikipedia
     """
-    query_template = _build_event_query()
+    query_template = _build_event_query(
+        exclude_event_types=exclude_event_types,
+        min_sitelinks=min_sitelinks,
+    )
     raw = sparql_query_paginated(
         query_template, page_size=2000, force_refresh=force_refresh,
     )
@@ -671,11 +735,18 @@ def load_notable_people(
     max_birth_year: int = 2000,
     require_birth_date: bool = True,
     force_refresh: bool = False,
+    min_sitelinks: int = 10,
 ) -> pd.DataFrame:
     """Load notable people with dates from Wikidata.
 
     Queries each occupation separately to avoid Wikidata query planner
     timeouts, then merges and deduplicates results.
+
+    Parameters
+    ----------
+    min_sitelinks
+        Minimum number of Wikipedia sitelinks for a person to be included.
+        Default 10.
 
     Returns DataFrame with columns:
         qid, name, birth_date, birth_year, death_date, death_year,
@@ -684,7 +755,7 @@ def load_notable_people(
     all_dfs: list[pd.DataFrame] = []
 
     for occ_qid, occ_label in _PEOPLE_OCCUPATIONS.items():
-        query_template = _build_people_query_for_occupation(occ_qid)
+        query_template = _build_people_query_for_occupation(occ_qid, min_sitelinks=min_sitelinks)
         try:
             raw = sparql_query_paginated(
                 query_template, page_size=1000, force_refresh=force_refresh,
@@ -808,13 +879,29 @@ _AUTHORSHIP_DOMAINS: dict[str, dict] = {
 }
 
 
-def _build_author_work_query(domain: str, creator_prop: str, work_type_qids: list[str]) -> str:
+def _build_author_work_query(
+    domain: str,
+    creator_prop: str,
+    work_type_qids: list[str],
+    min_work_sitelinks: int = 0,
+    min_author_sitelinks: int = 0,
+) -> str:
     """Build a paginated SPARQL query for author-work pairs in a creative domain.
 
     Requires English Wikipedia articles for both author and work,
     and filters to works with exactly one creator.
     """
     values_block = " ".join(f"wd:{qid}" for qid in work_type_qids)
+    sitelink_clauses = ""
+    if min_work_sitelinks > 0:
+        sitelink_clauses += f"""
+  ?work wikibase:sitelinks ?workSitelinks .
+  FILTER(?workSitelinks >= {min_work_sitelinks})"""
+    if min_author_sitelinks > 0:
+        sitelink_clauses += f"""
+  ?author wikibase:sitelinks ?authorSitelinks .
+  FILTER(?authorSitelinks >= {min_author_sitelinks})"""
+
     return f"""
 SELECT DISTINCT ?work ?workLabel ?workType ?workTypeLabel
        ?author ?authorLabel ?pubDate
@@ -826,7 +913,7 @@ WHERE {{{{
   ?work rdfs:label ?workLabel .
   ?author rdfs:label ?authorLabel .
   FILTER(LANG(?workLabel) = "en")
-  FILTER(LANG(?authorLabel) = "en")
+  FILTER(LANG(?authorLabel) = "en"){sitelink_clauses}
 
   ?authorArticle schema:about ?author ;
                  schema:isPartOf <https://en.wikipedia.org/> .
@@ -839,9 +926,23 @@ LIMIT {{limit}} OFFSET {{offset}}
 """
 
 
-def _build_named_after_query(work_type_qids: list[str]) -> str:
+def _build_named_after_query(
+    work_type_qids: list[str],
+    min_work_sitelinks: int = 0,
+    min_author_sitelinks: int = 0,
+) -> str:
     """Build a SPARQL query for science items using P138 (named after)."""
     values_block = " ".join(f"wd:{qid}" for qid in work_type_qids)
+    sitelink_clauses = ""
+    if min_work_sitelinks > 0:
+        sitelink_clauses += f"""
+  ?work wikibase:sitelinks ?workSitelinks .
+  FILTER(?workSitelinks >= {min_work_sitelinks})"""
+    if min_author_sitelinks > 0:
+        sitelink_clauses += f"""
+  ?author wikibase:sitelinks ?authorSitelinks .
+  FILTER(?authorSitelinks >= {min_author_sitelinks})"""
+
     return f"""
 SELECT DISTINCT ?work ?workLabel ?workType ?workTypeLabel
        ?author ?authorLabel ?pubDate
@@ -854,7 +955,7 @@ WHERE {{{{
   ?work rdfs:label ?workLabel .
   ?author rdfs:label ?authorLabel .
   FILTER(LANG(?workLabel) = "en")
-  FILTER(LANG(?authorLabel) = "en")
+  FILTER(LANG(?authorLabel) = "en"){sitelink_clauses}
 
   ?authorArticle schema:about ?author ;
                  schema:isPartOf <https://en.wikipedia.org/> .
@@ -873,6 +974,8 @@ def load_authors_and_works(
     use_pageview_filter: bool = False,
     pageview_threshold: int = 1000,
     force_refresh: bool = False,
+    min_work_sitelinks: int = 5,
+    min_author_sitelinks: int = 15,
 ) -> pd.DataFrame:
     """Load authors/creators and their works from Wikidata.
 
@@ -898,6 +1001,8 @@ def load_authors_and_works(
         # Main creator property query
         query_template = _build_author_work_query(
             domain_name, domain_cfg["creator_prop"], work_type_qids,
+            min_work_sitelinks=min_work_sitelinks,
+            min_author_sitelinks=min_author_sitelinks,
         )
         try:
             raw = sparql_query_paginated(
@@ -915,7 +1020,11 @@ def load_authors_and_works(
 
         # Science domain: also query named-after relationships
         if domain_name == "science" and "named_after_prop" in domain_cfg:
-            named_query = _build_named_after_query(work_type_qids)
+            named_query = _build_named_after_query(
+                work_type_qids,
+                min_work_sitelinks=min_work_sitelinks,
+                min_author_sitelinks=min_author_sitelinks,
+            )
             try:
                 raw_named = sparql_query_paginated(
                     named_query, page_size=2000, force_refresh=force_refresh,
@@ -952,6 +1061,33 @@ def load_authors_and_works(
     df = df[~df["work_name"].str.match(r"^Q\d+$", na=False)].copy()
 
     logger.info("Raw author-work pairs: %d", len(df))
+
+    # Filter out ambiguous workshop/school attributions in author names
+    _ATTRIBUTION_QUALIFIERS = [
+        "workshop of", "circle of", "follower of", "school of",
+        "attributed to", "manner of", "studio of", "copy of",
+    ]
+    before = len(df)
+    lower_names = df["author_name"].str.lower()
+    mask = pd.Series(False, index=df.index)
+    qualifier_counts: dict[str, int] = {}
+    for qualifier in _ATTRIBUTION_QUALIFIERS:
+        hits = lower_names.str.contains(qualifier, na=False)
+        qualifier_counts[qualifier] = int(hits.sum())
+        mask = mask | hits
+    # Also check "after " as a prefix (e.g. "after Raphael")
+    after_hits = lower_names.str.startswith("after ")
+    qualifier_counts["after "] = int(after_hits.sum())
+    mask = mask | after_hits
+
+    df = df[~mask].copy()
+    dropped = before - len(df)
+    if dropped > 0:
+        logger.info(
+            "Workshop/attribution filter: dropped %d rows. Per qualifier: %s",
+            dropped,
+            {k: v for k, v in qualifier_counts.items() if v > 0},
+        )
 
     # Drop works with multiple creators (shared authorship)
     # Count how many distinct authors each work has

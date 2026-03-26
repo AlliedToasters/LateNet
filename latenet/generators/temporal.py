@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from latenet.datasources.wikidata import (
+    DEFAULT_EXCLUDE_EVENT_TYPES,
     _century_label,
     _year_to_century,
     load_historical_events,
@@ -132,6 +133,9 @@ class TemporalGenerator(BaseGenerator):
         min_birth_year: int = -500,
         max_birth_year: int = 2000,
         force_refresh: bool = False,
+        exclude_event_types: frozenset[str] = DEFAULT_EXCLUDE_EVENT_TYPES,
+        min_sitelinks: int = 10,
+        prefer_recent: bool = True,
     ):
         super().__init__(seed=seed, max_pairs=max_pairs)
         self.min_year_gap = min_year_gap
@@ -144,6 +148,9 @@ class TemporalGenerator(BaseGenerator):
         self.min_birth_year = min_birth_year
         self.max_birth_year = max_birth_year
         self.force_refresh = force_refresh
+        self.exclude_event_types = exclude_event_types
+        self.min_sitelinks = min_sitelinks
+        self.prefer_recent = prefer_recent
 
         # Loaded lazily
         self._events: pd.DataFrame | None = None
@@ -173,11 +180,14 @@ class TemporalGenerator(BaseGenerator):
             min_year=self.min_year_events,
             max_year=self.max_year_events,
             force_refresh=self.force_refresh,
+            exclude_event_types=self.exclude_event_types,
+            min_sitelinks=self.min_sitelinks,
         )
         self._people = load_notable_people(
             min_birth_year=self.min_birth_year,
             max_birth_year=self.max_birth_year,
             force_refresh=self.force_refresh,
+            min_sitelinks=self.min_sitelinks,
         )
 
         logger.info(
@@ -208,6 +218,31 @@ class TemporalGenerator(BaseGenerator):
 
     # --- Helpers ---
 
+    def _recency_weight(self, year: int) -> float:
+        """Sampling weight favouring well-documented eras.
+
+        Post-1800: 1.0, 1500-1800: 0.5, pre-1500: 0.25.
+        Only applied when prefer_recent is True.
+        """
+        if not self.prefer_recent:
+            return 1.0
+        if year >= 1800:
+            return 1.0
+        if year >= 1500:
+            return 0.5
+        return 0.25
+
+    def _weighted_sample(self, df: pd.DataFrame, year_col: str) -> list[int]:
+        """Return index list with entries repeated by recency weight."""
+        indices = []
+        for idx in df.index:
+            year = int(df.loc[idx, year_col])
+            w = self._recency_weight(year)
+            # Weight 1.0 -> 4 copies, 0.5 -> 2, 0.25 -> 1
+            copies = max(1, int(w * 4))
+            indices.extend([idx] * copies)
+        return indices
+
     def _pick_template(self, relation: str) -> TempTemplate:
         templates = _ALL_TEMPLATES[relation]
         return templates[self.rng.randint(0, len(templates) - 1)]
@@ -220,7 +255,7 @@ class TemporalGenerator(BaseGenerator):
             return
 
         events = self._events
-        indices = list(events.index)
+        indices = self._weighted_sample(events, "year")
         self.rng.shuffle(indices)
 
         # Sample pairs rather than generating all O(n^2) combinations
@@ -288,7 +323,7 @@ class TemporalGenerator(BaseGenerator):
             return
 
         people = self._people
-        indices = list(people.index)
+        indices = self._weighted_sample(people, "birth_year")
         self.rng.shuffle(indices)
 
         max_attempts = min(len(indices) * 5, 10000)
