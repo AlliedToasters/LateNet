@@ -25,6 +25,33 @@ latenet-build --rows-per-stratum 50 --output latenet_v1.parquet
 latenet-build --rows-per-stratum 10 --generators biology temporal --legs anthropic
 ```
 
+## Canonical Dataset Build
+
+The main data product is a balanced, LLM-validated parquet file produced by `latenet-build`. The process:
+
+1. **Generate** — Each generator produces candidate contrastive pairs from structured data sources (WordNet, Wikidata, Natural Earth, mendeleev). Generation is deterministic per seed.
+2. **Validate** — Every candidate is judged by two independent validators:
+   - **Llama 405B Instruct** (logit-level True/False via NDIF/lmprobe, `logit_top_k=10`)
+   - **Claude Sonnet** (text-level True/False via Anthropic API)
+   - Sonnet disagreements are **escalated to Opus** for the dispute record.
+3. **Accept** — Only rows where *both* Llama and Sonnet agree with the ground-truth label enter the clean dataset.
+4. **Dispute** — Rows where any validator disagrees go to a sidecar `disputes.parquet` with full validation metadata (logit gaps, model responses, escalation results). These are not discarded — they're valuable for understanding generator failure modes.
+5. **Loop** — If any (generator, difficulty) stratum is under-filled, generate a new batch with an incremented seed (`seed + round * 1000`) and repeat from step 2. The loop runs until all strata have exactly `rows_per_stratum` pairs, or `max_rounds` is reached.
+
+```bash
+# Build the canonical dataset: 50 pairs per (generator, difficulty) cell
+latenet-build --rows-per-stratum 50 --seed 42 --output latenet_v1.parquet
+
+# Subset of generators, Anthropic-only validation (skip NDIF)
+latenet-build --rows-per-stratum 20 --generators biology temporal --legs anthropic
+
+# Outputs:
+#   latenet_v1.parquet           — clean dataset (balanced, all validators agree)
+#   latenet_v1.disputes.parquet  — disputed rows with validation metadata
+```
+
+**Required env vars:** `ANTHROPIC_API_KEY`, `NDIF_API_KEY` (for the NDIF/Llama leg).
+
 ## Dependencies
 
 - Python 3.10+

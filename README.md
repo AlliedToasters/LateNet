@@ -24,13 +24,24 @@ pip install -e .
 ## Quick Start
 
 ```bash
-# Generate contrastive pairs (all generators)
-latenet-generate --seed 42 --output candidates.parquet
+# Build the canonical dataset (generate + validate + balance in one step)
+latenet-build --rows-per-stratum 50 --seed 42 --output latenet_v1.parquet
 
-# Or run specific generators
+# This produces:
+#   latenet_v1.parquet           — clean, balanced dataset
+#   latenet_v1.disputes.parquet  — rows where validators disagreed (for analysis)
+```
+
+Requires `ANTHROPIC_API_KEY` and `NDIF_API_KEY` environment variables for the validation pipeline.
+
+### Other CLI tools
+
+```bash
+# Generate candidates without validation
+latenet-generate --seed 42 --output candidates.parquet
 latenet-generate --generators wordnet --max-depth 8 --output candidates.parquet
 
-# Validate with LLM ensemble voting
+# Validate an existing dataset (one-shot, no stratification loop)
 latenet-validate --input candidates.parquet --output validated.parquet
 
 # Export final dataset
@@ -54,6 +65,20 @@ The **WordNet generator** walks the noun hierarchy, generating true statements f
 
 All generators share a common contract (`BaseGenerator`) and produce `ContrastivePair` objects with a standardized schema. Generated pairs are validated by an LLM ensemble and exported as labeled Parquet files.
 
+### The Build Process
+
+`latenet-build` is the canonical way to produce a dataset. It runs a generate-validate-accept loop:
+
+1. **Generate** candidate pairs from structured data sources (deterministic per seed)
+2. **Validate** each candidate with two independent LLM judges:
+   - **Llama 3.1 405B Instruct** — logit-level True/False via [NDIF](https://ndif.us)/[lmprobe](https://github.com/AlliedToasters/lmprobe) (no local GPU needed)
+   - **Claude Sonnet** — text-level True/False via Anthropic API
+   - Sonnet disagreements are escalated to **Claude Opus** for the dispute record
+3. **Accept** only rows where both validators agree with the ground-truth label
+4. **Loop** with a new seed until every (generator × difficulty) stratum has the target number of pairs
+
+Disputed rows are saved to a sidecar file with full validation metadata (logit gaps, model responses, Opus escalation results). The clean dataset has perfectly even representation across all generators and difficulty tiers.
+
 ## Generators
 
 | Generator | Data Source | Relation Types |
@@ -61,11 +86,11 @@ All generators share a common contract (`BaseGenerator`) and produce `Contrastiv
 | **wordnet** | NLTK WordNet | hypernymy, meronymy, antonymy, sibling |
 | **geography** | Natural Earth, GeoNames | contained-in, cardinal-direction, closer-to, population-greater, area-greater |
 | **chemistry** | mendeleev (periodic table) | symbol-of, member-of-group, state-at-room-temp, in-block, atomic-number-greater, property-greater |
-| temporal | Historical databases | before, after, century-of |
+| **temporal** | Wikidata (events, people) | happened-before, born-before, occurred-in-century, lived-before-event, were-contemporaries |
+| **biology** | Wikidata (taxonomy) | is-member-of (species→genus, genus→family, etc.) |
 | language | Translation dictionaries | translates-to |
 | magnitude | World Bank, reference tables | greater-than, less-than |
 | authorship | Literary/scientific databases | written-by, proposed-by |
-| biology | NCBI taxonomy | is-a, part-of |
 
 **Bold** = implemented. Others are stubbed with the `BaseGenerator` contract, ready for incremental development.
 
@@ -102,7 +127,7 @@ latenet/
 │   ├── templates/       # Statement templates per relation type
 │   ├── negation/        # False statement generation strategies
 │   ├── difficulty/      # Difficulty tiers and semantic distance
-│   ├── validation/      # LLM ensemble voting and escalation
+│   ├── validation/      # LLM ensemble voting, escalation, and stratified build loop
 │   └── io/              # Export to parquet
 ├── scripts/             # CLI entry points
 ├── data_sources/        # Static reference data for domain generators
