@@ -170,10 +170,23 @@ def run_ndif_leg(
                     t_logit = last_logits[i].item()
                 elif vid == false_id:
                     f_logit = last_logits[i].item()
-            verdict.says_true = t_logit > f_logit
-            verdict.confidence = abs(t_logit - f_logit)
-            verdict.raw = f"true_logit={t_logit:.4f}, false_logit={f_logit:.4f}"
-            verdict.agrees_with_label = verdict.says_true == bool(row["label"])
+
+            # Guard: neither True nor False in top-k
+            if t_logit == float("-inf") and f_logit == float("-inf"):
+                top_ids = last_indices.tolist()
+                logger.warning(
+                    "NDIF row %d: neither True nor False in top-k. "
+                    "Top token IDs: %s. Statement: %.80s",
+                    idx, top_ids, row["statement"],
+                )
+                verdict.confidence = float("-inf")
+                verdict.raw = f"true_logit=-inf, false_logit=-inf, top_ids={top_ids}"
+                verdict.error = "true_false_not_in_topk"
+            else:
+                verdict.says_true = t_logit > f_logit
+                verdict.confidence = abs(t_logit - f_logit)
+                verdict.raw = f"true_logit={t_logit:.4f}, false_logit={f_logit:.4f}"
+                verdict.agrees_with_label = verdict.says_true == bool(row["label"])
         except Exception as e:
             logger.error("NDIF failed for row %d after retries: %s", idx, e)
             verdict.error = str(e)
@@ -356,6 +369,240 @@ def run_anthropic_leg(
         logger.info("Opus escalation: %d/%d agree with labels", opus_agrees, len(disagree_idxs))
 
     return results
+
+
+def run_parallel_validation(
+    df: pd.DataFrame,
+    legs: set[str] | None = None,
+    checkpoint_dir: Path | None = None,
+) -> tuple[dict[int, RowVerdict] | None, dict[int, dict[str, RowVerdict]] | None]:
+    """Run NDIF and Anthropic legs in parallel, per row.
+
+    Every completed row has verdicts from both legs, enabling graceful
+    early stopping — if the process is killed, all finished rows are
+    atomically complete and usable for consensus.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must have 'statement' and 'label' columns.
+    legs : set[str] | None
+        Which legs to run. Default: {"ndif", "anthropic"}.
+    checkpoint_dir : Path | None
+        Directory for checkpoint files.
+
+    Returns
+    -------
+    (ndif_verdicts, anthropic_verdicts) — same format as the individual
+    leg functions, suitable for passing to merge_verdicts().
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    if legs is None:
+        legs = {"ndif", "anthropic"}
+
+    run_ndif = "ndif" in legs
+    run_anthropic = "anthropic" in legs
+
+    # --- Set up NDIF resources (shared across rows) ---
+    ndif_ext = None
+    ndif_tok = None
+    ndif_true_id = None
+    ndif_false_id = None
+
+    if run_ndif:
+        import os
+        from lmprobe.extraction import ActivationExtractor
+        from transformers import AutoTokenizer
+
+        if "NNSIGHT_API_KEY" not in os.environ and "NDIF_API_KEY" in os.environ:
+            os.environ["NNSIGHT_API_KEY"] = os.environ["NDIF_API_KEY"]
+
+        ndif_tok = AutoTokenizer.from_pretrained(LLAMA_TOKENIZER)
+        ndif_true_id = ndif_tok.encode("True", add_special_tokens=False)[0]
+        ndif_false_id = ndif_tok.encode("False", add_special_tokens=False)[0]
+        ndif_ext = ActivationExtractor(
+            model_name=LLAMA_MODEL,
+            device="cpu",
+            layers=[0],
+            backend="nnsight",
+            remote=True,
+        )
+
+    # --- Set up Anthropic client ---
+    anthropic_client = None
+    if run_anthropic:
+        from anthropic import Anthropic
+        anthropic_client = Anthropic()
+
+    # --- Load checkpoints ---
+    ndif_checkpoint_path = checkpoint_dir / "ndif_checkpoint.json" if checkpoint_dir else None
+    anthropic_checkpoint_path = checkpoint_dir / "anthropic_checkpoint.json" if checkpoint_dir else None
+
+    existing_ndif: dict[int, dict] = {}
+    existing_anthropic: dict[str, dict] = {}
+
+    if ndif_checkpoint_path:
+        ckpt = _load_checkpoint(ndif_checkpoint_path)
+        if ckpt:
+            existing_ndif = {int(k): v for k, v in ckpt.get("results", {}).items()}
+            logger.info("Resumed NDIF checkpoint with %d results", len(existing_ndif))
+
+    if anthropic_checkpoint_path:
+        ckpt = _load_checkpoint(anthropic_checkpoint_path)
+        if ckpt:
+            existing_anthropic = ckpt.get("results", {})
+            logger.info("Resumed Anthropic checkpoint with %d results", len(existing_anthropic))
+
+    # --- Result accumulators ---
+    ndif_verdicts: dict[int, RowVerdict] = {}
+    anthropic_verdicts: dict[int, dict[str, RowVerdict]] = {}
+
+    def _ndif_one_row(idx: int, row: pd.Series) -> RowVerdict:
+        """Validate a single row via NDIF."""
+        from lmprobe.retry import retry_with_backoff
+
+        if idx in existing_ndif and existing_ndif[idx].get("error") is None:
+            v = existing_ndif[idx]
+            return RowVerdict(
+                says_true=v.get("says_true"),
+                agrees_with_label=v.get("agrees_with_label"),
+                confidence=v.get("confidence"),
+                raw=v.get("raw"),
+            )
+
+        prompt = _chat_format(row["statement"])
+        try:
+            _acts, _mask, logits, logits_indices = retry_with_backoff(
+                lambda p=prompt: ndif_ext.extract_batch_with_logits(
+                    [p], [0], remote=True, logit_top_k=10,
+                ),
+                max_retries=5,
+                base_delay=3.0,
+                max_delay=120.0,
+                context=f"NDIF row {idx}",
+            )
+            last_logits = logits[0, -1, :]
+            last_indices = logits_indices[0, -1, :]
+            t_logit = float("-inf")
+            f_logit = float("-inf")
+            for i, vid in enumerate(last_indices.tolist()):
+                if vid == ndif_true_id:
+                    t_logit = last_logits[i].item()
+                elif vid == ndif_false_id:
+                    f_logit = last_logits[i].item()
+
+            # Guard: neither True nor False in top-k
+            if t_logit == float("-inf") and f_logit == float("-inf"):
+                top_ids = last_indices.tolist()
+                logger.warning(
+                    "NDIF row %d: neither True nor False in top-k. "
+                    "Top token IDs: %s. Statement: %.80s",
+                    idx, top_ids, row["statement"],
+                )
+                return RowVerdict(
+                    confidence=float("-inf"),
+                    raw=f"true_logit=-inf, false_logit=-inf, top_ids={top_ids}",
+                    error="true_false_not_in_topk",
+                )
+
+            verdict = RowVerdict(
+                says_true=t_logit > f_logit,
+                confidence=abs(t_logit - f_logit),
+                raw=f"true_logit={t_logit:.4f}, false_logit={f_logit:.4f}",
+            )
+            verdict.agrees_with_label = verdict.says_true == bool(row["label"])
+            return verdict
+        except Exception as e:
+            logger.error("NDIF failed for row %d: %s", idx, e)
+            return RowVerdict(error=str(e))
+
+    def _anthropic_one_row(idx: int, row: pd.Series) -> dict[str, RowVerdict]:
+        """Validate a single row via Sonnet (+ Opus escalation if needed)."""
+        str_idx = str(idx)
+        result: dict[str, RowVerdict] = {}
+
+        # Sonnet
+        if str_idx in existing_anthropic and "sonnet" in existing_anthropic[str_idx]:
+            s = existing_anthropic[str_idx]["sonnet"]
+            sonnet_v = RowVerdict(
+                says_true=s.get("says_true"),
+                agrees_with_label=s.get("agrees_with_label"),
+                raw=s.get("raw"),
+                error=s.get("error"),
+            )
+        else:
+            sonnet_v = _query_anthropic(anthropic_client, SONNET_MODEL, row["statement"])
+            if sonnet_v.says_true is not None:
+                sonnet_v.agrees_with_label = sonnet_v.says_true == bool(row["label"])
+        result["sonnet"] = sonnet_v
+
+        # Opus escalation if Sonnet disagreed
+        if sonnet_v.agrees_with_label is False:
+            if str_idx in existing_anthropic and "opus" in existing_anthropic.get(str_idx, {}):
+                o = existing_anthropic[str_idx]["opus"]
+                opus_v = RowVerdict(
+                    says_true=o.get("says_true"),
+                    agrees_with_label=o.get("agrees_with_label"),
+                    raw=o.get("raw"),
+                    error=o.get("error"),
+                )
+            else:
+                opus_v = _query_anthropic(anthropic_client, OPUS_MODEL, row["statement"])
+                if opus_v.says_true is not None:
+                    opus_v.agrees_with_label = opus_v.says_true == bool(row["label"])
+            result["opus"] = opus_v
+
+        return result
+
+    # --- Per-row parallel loop ---
+    logger.info("=== Per-row parallel validation: %d rows, legs=%s ===", len(df), legs)
+    completed = 0
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        for idx, row in df.iterrows():
+            futures = {}
+            if run_ndif:
+                futures["ndif"] = pool.submit(_ndif_one_row, idx, row)
+            if run_anthropic:
+                futures["anthropic"] = pool.submit(_anthropic_one_row, idx, row)
+
+            if "ndif" in futures:
+                ndif_verdicts[idx] = futures["ndif"].result()
+            if "anthropic" in futures:
+                anthropic_verdicts[idx] = futures["anthropic"].result()
+
+            completed += 1
+
+            # Checkpoint both legs after each row
+            if ndif_checkpoint_path and run_ndif:
+                serializable = {
+                    str(k): {
+                        "says_true": v.says_true,
+                        "agrees_with_label": v.agrees_with_label,
+                        "confidence": v.confidence,
+                        "raw": v.raw,
+                        "error": v.error,
+                    }
+                    for k, v in ndif_verdicts.items()
+                }
+                _save_checkpoint(ndif_checkpoint_path, {
+                    "results": serializable,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                })
+
+            if anthropic_checkpoint_path and run_anthropic:
+                _save_anthropic_checkpoint(anthropic_checkpoint_path, anthropic_verdicts)
+
+            if completed % 50 == 0:
+                logger.info("  %d/%d rows complete", completed, len(df))
+
+    logger.info("Parallel validation complete: %d rows", completed)
+
+    return (
+        ndif_verdicts if run_ndif else None,
+        anthropic_verdicts if run_anthropic else None,
+    )
 
 
 def _save_anthropic_checkpoint(path: Path, results: dict[int, dict[str, RowVerdict]]) -> None:
