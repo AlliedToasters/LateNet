@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-AVAILABLE_GENERATORS = ["wordnet", "geography", "chemistry", "biology", "temporal"]
+AVAILABLE_GENERATORS = ["wordnet", "geography", "chemistry", "biology", "temporal", "authorship", "language"]
 VALID_LEGS = {"ndif", "anthropic"}
 
 
@@ -57,6 +57,11 @@ def main():
         "--legs", nargs="+", default=list(VALID_LEGS),
         help=f"Validation legs to run (default: all). Options: {sorted(VALID_LEGS)}",
     )
+    parser.add_argument(
+        "--cap", nargs=2, action="append", metavar=("GENERATOR", "MAX_PAIRS"),
+        help="Per-generator cap on pairs per stratum, e.g. --cap chemistry 30. "
+             "Can be repeated for multiple generators.",
+    )
     args = parser.parse_args()
 
     legs = set(args.legs)
@@ -73,6 +78,12 @@ def main():
     output_dir = output_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Parse per-generator caps: --cap chemistry 30 --cap biology 50
+    generator_caps: dict[str, int] = {}
+    if args.cap:
+        for gen_name, cap_str in args.cap:
+            generator_caps[gen_name] = int(cap_str)
+
     from latenet.validation.stratified import build_stratified_dataset
 
     clean_df, disputes_df = build_stratified_dataset(
@@ -83,6 +94,7 @@ def main():
         oversample_factor=args.oversample,
         output_dir=output_dir,
         legs=legs,
+        generator_caps=generator_caps,
     )
 
     if len(clean_df) > 0:

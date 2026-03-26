@@ -1007,9 +1007,219 @@ def _normalize_author_work_df(
     return chunk
 
 
-def load_translations(**kwargs) -> pd.DataFrame:
-    """Load translation pairs from Wikidata.
+# ---------------------------------------------------------------------------
+# Translation extract — entity categories and SPARQL queries
+# ---------------------------------------------------------------------------
 
-    Not yet implemented — stub for language generator.
+# Concrete noun categories for translation pairs: QID -> (label, entity_domain)
+_TRANSLATION_CATEGORIES: dict[str, tuple[str, str]] = {
+    # Animals
+    "Q729": ("animal", "animal"),
+    "Q7377": ("mammal", "animal"),
+    "Q5113": ("bird", "animal"),
+    "Q152": ("fish", "animal"),
+    "Q1390": ("insect", "animal"),
+    "Q10811": ("reptile", "animal"),
+    # Fruits & foods
+    "Q3314483": ("fruit", "food"),
+    "Q11004": ("vegetable", "food"),
+    # Countries & geography
+    "Q6256": ("country", "country"),
+    "Q515": ("city", "country"),
+    # Body & nature
+    "Q712378": ("body part", "body"),
+    "Q1075": ("color", "object"),
+    # Common objects
+    "Q39546": ("tool", "object"),
+    "Q11460": ("clothing", "object"),
+    "Q223557": ("musical instrument", "object"),
+}
+
+# Default target languages
+DEFAULT_TARGET_LANGUAGES = ["es", "fr", "de", "pt", "it", "zh", "ja", "ru", "ar", "hi"]
+
+# Full language display names
+LANGUAGE_DISPLAY_NAMES: dict[str, str] = {
+    "es": "Spanish", "fr": "French", "de": "German", "pt": "Portuguese",
+    "it": "Italian", "zh": "Chinese", "ja": "Japanese", "ru": "Russian",
+    "ar": "Arabic", "hi": "Hindi", "en": "English",
+}
+
+# Expected Unicode script ranges for non-Latin languages
+_SCRIPT_RANGES: dict[str, list[tuple[int, int]]] = {
+    "zh": [(0x4E00, 0x9FFF), (0x3400, 0x4DBF), (0x2E80, 0x2EFF), (0x3000, 0x303F)],
+    "ja": [(0x3040, 0x309F), (0x30A0, 0x30FF), (0x4E00, 0x9FFF), (0x3400, 0x4DBF)],
+    "ru": [(0x0400, 0x04FF), (0x0500, 0x052F)],
+    "ar": [(0x0600, 0x06FF), (0x0750, 0x077F), (0xFB50, 0xFDFF), (0xFE70, 0xFEFF)],
+    "hi": [(0x0900, 0x097F), (0xA8E0, 0xA8FF)],
+}
+
+
+def _in_expected_script(text: str, lang: str) -> bool:
+    """Check that at least 50% of non-space characters are in the expected script."""
+    ranges = _SCRIPT_RANGES.get(lang)
+    if ranges is None:
+        return True  # Latin-script languages: no check needed
+    chars = [c for c in text if not c.isspace()]
+    if not chars:
+        return False
+    in_script = sum(
+        1 for c in chars
+        if any(lo <= ord(c) <= hi for lo, hi in ranges)
+    )
+    return in_script / len(chars) >= 0.5
+
+
+def _is_clean_label(label: str) -> bool:
+    """Check that a label is a clean single-word or short-phrase translation.
+
+    Rejects labels with parentheses, commas, or more than 4 words.
     """
-    raise NotImplementedError("Translations extract not yet implemented")
+    if not label or not label.strip():
+        return False
+    if "(" in label or ")" in label or "," in label:
+        return False
+    if len(label.split()) > 4:
+        return False
+    return True
+
+
+def _build_translation_query(category_qid: str, lang_code: str) -> str:
+    """Build a SPARQL query for entities of a category with labels in a target language.
+
+    Requires entities to have an English Wikipedia article (common knowledge filter).
+    """
+    return f"""
+SELECT DISTINCT ?item ?itemLabel ?targetLabel ?article
+WHERE {{
+  ?item wdt:P31/wdt:P279* wd:{category_qid} .
+  ?item rdfs:label ?itemLabel .
+  ?item rdfs:label ?targetLabel .
+  FILTER(LANG(?itemLabel) = "en")
+  FILTER(LANG(?targetLabel) = "{lang_code}")
+
+  ?article schema:about ?item ;
+           schema:isPartOf <https://en.wikipedia.org/> .
+}}
+LIMIT 5000
+"""
+
+
+def load_translations(
+    source_language: str = "en",
+    target_languages: list[str] | None = None,
+    entity_domains: list[str] | None = None,
+    min_languages_per_entity: int = 3,
+    use_pageview_filter: bool = False,
+    pageview_threshold: int = 1000,
+    force_refresh: bool = False,
+) -> pd.DataFrame:
+    """Load translation pairs from Wikidata multilingual labels.
+
+    Queries concrete noun categories for entities with multilingual labels.
+    Filters to clean, unambiguous single-word translations.
+
+    Returns DataFrame with columns:
+        qid, english_label, target_language, target_label,
+        entity_domain, has_wikipedia
+    """
+    target_langs = target_languages or DEFAULT_TARGET_LANGUAGES
+    all_rows: list[dict] = []
+
+    # Determine which categories to query
+    categories = _TRANSLATION_CATEGORIES
+    if entity_domains:
+        domain_set = set(entity_domains)
+        categories = {
+            qid: (cat_label, domain)
+            for qid, (cat_label, domain) in _TRANSLATION_CATEGORIES.items()
+            if domain in domain_set
+        }
+
+    for cat_qid, (cat_label, entity_domain) in categories.items():
+        for lang_code in target_langs:
+            query = _build_translation_query(cat_qid, lang_code)
+            try:
+                raw = sparql_query(query, force_refresh=force_refresh)
+            except RuntimeError:
+                logger.warning(
+                    "Skipping category %s (%s) for language %s due to query failure",
+                    cat_label, cat_qid, lang_code,
+                )
+                continue
+
+            if raw.empty:
+                continue
+
+            for _, row in raw.iterrows():
+                en_label = str(row.get("itemLabel", "")).strip()
+                target_label = str(row.get("targetLabel", "")).strip()
+                qid = _extract_qid(str(row.get("item", "")))
+
+                # Skip if either label is empty or looks like a QID
+                if not en_label or not target_label:
+                    continue
+                if en_label.startswith("Q") and en_label[1:].isdigit():
+                    continue
+                if target_label.startswith("Q") and target_label[1:].isdigit():
+                    continue
+
+                # Skip homographs (same word in both languages)
+                if en_label.lower() == target_label.lower():
+                    continue
+
+                # Skip multi-word / disambiguated labels
+                if not _is_clean_label(target_label):
+                    continue
+                if not _is_clean_label(en_label):
+                    continue
+
+                # Script validation for non-Latin languages
+                if not _in_expected_script(target_label, lang_code):
+                    continue
+
+                all_rows.append({
+                    "qid": qid,
+                    "english_label": en_label,
+                    "target_language": lang_code,
+                    "target_label": target_label,
+                    "entity_domain": entity_domain,
+                    "has_wikipedia": True,
+                })
+
+        logger.info("Category %s (%s): %d translation rows so far",
+                     cat_label, cat_qid, len(all_rows))
+
+    if not all_rows:
+        logger.warning("No translations returned from Wikidata queries")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_rows)
+
+    # Deduplicate: keep one row per (english_label, target_language, target_label)
+    before = len(df)
+    df = df.drop_duplicates(
+        subset=["english_label", "target_language", "target_label"],
+        keep="first",
+    ).reset_index(drop=True)
+    logger.info("Deduplication: %d -> %d rows", before, len(df))
+
+    # Filter entities that don't have translations in enough target languages
+    lang_counts = df.groupby("qid")["target_language"].nunique()
+    valid_qids = set(lang_counts[lang_counts >= min_languages_per_entity].index)
+    before = len(df)
+    df = df[df["qid"].isin(valid_qids)].copy().reset_index(drop=True)
+    logger.info(
+        "Min-languages filter (>=%d): %d -> %d rows (%d entities)",
+        min_languages_per_entity, before, len(df), len(valid_qids),
+    )
+
+    logger.info(
+        "Final translations dataset: %d pairs, %d entities, %d languages",
+        len(df), df["qid"].nunique(), df["target_language"].nunique(),
+    )
+    for lang in sorted(df["target_language"].unique()):
+        lang_df = df[df["target_language"] == lang]
+        logger.info("  %s: %d pairs", lang, len(lang_df))
+
+    return df
