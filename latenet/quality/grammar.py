@@ -132,6 +132,8 @@ For each statement, do one of three things:
 
 3. FLAG: If the statement is too malformed to correct without risking a change in factual meaning, flag it. Explain why in the changes field.
 
+4. NONSENSICAL: If the statement is semantically incoherent, tautological, or meaningless regardless of grammar (e.g. "A food has a food", "blue is a organization"). These are generation errors, not grammar errors. Explain what makes it nonsensical in the changes field.
+
 Rules:
 - NEVER change entities, relationships, quantities, or truth values
 - NEVER add information, qualifiers, or hedging
@@ -147,7 +149,7 @@ Respond with ONLY a JSON object matching this schema. No markdown, no backticks,
             "index": <int>,
             "original": <string>,
             "corrected": <string or null>,
-            "status": "corrected" | "unchanged" | "flagged",
+            "status": "corrected" | "unchanged" | "flagged" | "nonsensical",
             "changes": <string description of changes or null>
         }
     ]
@@ -160,7 +162,7 @@ class CorrectionResult:
 
     original: str
     corrected: str | None
-    status: str  # "corrected", "unchanged", or "flagged"
+    status: str  # "corrected", "unchanged", "flagged", or "nonsensical"
     changes: str | None
 
 
@@ -285,7 +287,7 @@ class GrammarCorrector:
                 original=pair.false_statement, corrected=None,
                 status="unchanged", changes=None,
             ))
-            excluded = true_res.status == "flagged" or false_res.status == "flagged"
+            excluded = true_res.status in ("flagged", "nonsensical") or false_res.status in ("flagged", "nonsensical")
 
             if not excluded:
                 # Apply corrections

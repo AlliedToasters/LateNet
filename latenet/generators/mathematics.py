@@ -161,7 +161,7 @@ _COPRIME_TEMPLATES = [
     MathTemplate("math_coprime_01", "shares_factor",
                  "{a} and {b} share a common factor."),
     MathTemplate("math_coprime_02", "shares_factor",
-                 "{a} and {b} have a greatest common divisor greater than 1."),
+                 "{a} and {b} have the greatest common divisor greater than 1."),
     MathTemplate("math_coprime_03", "shares_factor",
                  "{a} and {b} are coprime."),
 ]

@@ -139,7 +139,7 @@ class BiologyGenerator(BaseGenerator):
         min_per_family: int = 2,
         min_per_order: int = 2,
         force_refresh: bool = False,
-        min_sitelinks: int = 10,
+        min_sitelinks: int = 5,
     ):
         super().__init__(seed=seed, max_pairs=max_pairs)
         self.require_common_name = require_common_name

@@ -18,9 +18,15 @@ from latenet.negation.strategies import apply_negation
 logger = logging.getLogger(__name__)
 
 
+_lemma_count_cache: dict[str, int] = {}
+
+
 def _max_lemma_count(synset) -> int:
     """Return the maximum lemma frequency count for any lemma in a synset."""
-    return max((lemma.count() for lemma in synset.lemmas()), default=0)
+    key = synset.name()
+    if key not in _lemma_count_cache:
+        _lemma_count_cache[key] = max((lemma.count() for lemma in synset.lemmas()), default=0)
+    return _lemma_count_cache[key]
 
 
 def _synset_is_attested(synset) -> bool:

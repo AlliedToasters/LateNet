@@ -98,9 +98,9 @@ def _run_grammar_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     corrected_count = 0
 
     for (pid, side, _), result in zip(flagged_stmts, results):
-        if result.status == "flagged":
+        if result.status in ("flagged", "nonsensical"):
             excluded_pairs.add(pid)
-            logger.info("Excluding pair %s: %s", pid, result.changes)
+            logger.info("Excluding pair %s (%s): %s", pid, result.status, result.changes)
         elif result.status == "corrected" and result.corrected:
             corrections[(pid, side)] = result.corrected
             corrected_count += 1

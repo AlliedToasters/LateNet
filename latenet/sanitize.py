@@ -14,6 +14,7 @@ import re
 import inflect
 
 _engine = inflect.engine()
+_article_cache: dict[str, str] = {}
 
 
 def resolve_article(entity: str) -> str:
@@ -24,7 +25,11 @@ def resolve_article(entity: str) -> str:
     """
     if not entity:
         return entity
-    return _engine.a(entity)
+    if entity in _article_cache:
+        return _article_cache[entity]
+    result = _engine.a(entity)
+    _article_cache[entity] = result
+    return result
 
 
 def sanitize_statement(text: str) -> str:
