@@ -214,6 +214,28 @@ class BiologyGenerator(BaseGenerator):
             len(self._class_groups),
         )
 
+        # Log order-level family density for medium-tier viability
+        self._log_order_family_density(species)
+
+    def _log_order_family_density(self, species: pd.DataFrame) -> None:
+        """Log how many distinct families each order has, to assess medium-tier viability."""
+        if "order" not in species.columns or "family" not in species.columns:
+            return
+        valid = species.dropna(subset=["order", "family"])
+        order_family = valid.groupby("order")["family"].nunique()
+        single_family = order_family[order_family == 1]
+        multi_family = order_family[order_family >= 2]
+        logger.info(
+            "Order-family density: %d orders with 2+ families (medium-tier eligible), "
+            "%d orders with only 1 family",
+            len(multi_family), len(single_family),
+        )
+        if len(single_family) > 0:
+            logger.debug(
+                "Single-family orders (no medium-tier membership pairs): %s",
+                sorted(single_family.index.tolist()),
+            )
+
     def _build_groups(self, df: pd.DataFrame, col: str) -> dict[str, list[int]]:
         """Group DataFrame indices by a taxonomy column value."""
         groups: dict[str, list[int]] = {}
@@ -316,14 +338,16 @@ class BiologyGenerator(BaseGenerator):
         """Pick swap taxa for membership at different difficulties.
 
         Returns list of (swap_taxon_name, difficulty, strategy, semantic_distance).
+
+        Difficulty tiers:
+        - Hard: sibling taxon (same parent rank). E.g., different family in
+          the same order.
+        - Medium: cousin taxon (same grandparent rank, different parent).
+          E.g., different family in the same class but different order.
+        - Easy: distant taxon at the same rank.
         """
         true_taxon = row[rank_col]
         swaps = []
-
-        # Map rank_col to groups and sibling concept
-        # Hard: swap with a different taxon at the same rank that's in the same parent rank
-        # Medium: same rank, different parent
-        # Easy: different rank entirely (e.g., swap family with a kingdom name)
 
         rank_clean = rank_col.rstrip("_")
         rank_idx = RANK_LEVEL.get(rank_clean, -1)
@@ -335,6 +359,8 @@ class BiologyGenerator(BaseGenerator):
 
         if not all_taxa:
             return swaps
+
+        sibling_picks: set[str] = set()
 
         # Hard: taxon in same parent rank (sibling)
         parent_rank_idx = rank_idx + 1
@@ -352,9 +378,31 @@ class BiologyGenerator(BaseGenerator):
                     pick = self.rng.choice(sorted(siblings))
                     swaps.append((pick, Difficulty.HARD.value,
                                   NegationStrategy.SIBLING_SWAP.value, 1))
+                    sibling_picks = siblings
 
-        # Easy: distant taxon at same rank (different grandparent)
-        distant = sorted(all_taxa - {s[0] for s in swaps})
+        # Medium: cousin taxon (same grandparent rank, different parent)
+        grandparent_rank_idx = rank_idx + 2
+        if grandparent_rank_idx < len(RANK_ORDER):
+            gp_rank = RANK_ORDER[grandparent_rank_idx]
+            gp_col = f"{gp_rank}" if gp_rank != "class" else "class_"
+            gp_val = row.get(gp_col)
+            if pd.notna(gp_val) and gp_val:
+                # All taxa at this rank that share the grandparent
+                cousins_all = set(
+                    self._organisms[
+                        self._organisms[gp_col] == gp_val
+                    ][rank_col].dropna().unique()
+                ) - {true_taxon}
+                # Exclude siblings (same parent) to get true cousins
+                cousins = sorted(cousins_all - sibling_picks)
+                if cousins:
+                    pick = self.rng.choice(cousins)
+                    swaps.append((pick, Difficulty.MEDIUM.value,
+                                  NegationStrategy.SIBLING_SWAP.value, 2))
+
+        # Easy: distant taxon at same rank
+        used = {s[0] for s in swaps}
+        distant = sorted(all_taxa - used - sibling_picks)
         if distant:
             pick = self.rng.choice(distant)
             swaps.append((pick, Difficulty.EASY.value,
