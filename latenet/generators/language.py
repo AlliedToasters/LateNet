@@ -1,6 +1,6 @@
 """Translation equivalence across language pairs.
 
-Data source: Wikidata multilingual labels (via load_translations).
+Data source: Meta's MUSE bilingual dictionaries (via muse_data).
 Relations: translates_to, translation_of, word_is_language.
 Domains: language.
 """
@@ -14,12 +14,13 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from latenet.datasources.wikidata import (
+from latenet.generators.base import BaseGenerator
+from latenet.generators.muse_data import (
     DEFAULT_TARGET_LANGUAGES,
     LANGUAGE_DISPLAY_NAMES,
-    load_translations,
+    load_dictionary,
+    tag_domains,
 )
-from latenet.generators.base import BaseGenerator
 from latenet.types import ContrastivePair, Difficulty, NegationStrategy
 
 logger = logging.getLogger(__name__)
@@ -123,32 +124,28 @@ class LanguageGenerator(BaseGenerator):
         seed: int = 42,
         max_pairs: int | None = None,
         target_languages: list[str] | None = None,
-        min_languages_per_entity: int = 3,
         per_language_cap: int | None = None,
         per_domain_cap: int | None = None,
         force_refresh: bool = False,
     ):
         super().__init__(seed=seed, max_pairs=max_pairs)
         self.target_languages = target_languages or DEFAULT_TARGET_LANGUAGES
-        self.min_languages_per_entity = min_languages_per_entity
         self.per_language_cap = per_language_cap
         self.per_domain_cap = per_domain_cap
         self.force_refresh = force_refresh
 
         # Loaded lazily
         self._data: pd.DataFrame | None = None
-        # Lookup: (english_label, target_language) -> target_label
+        # Lookup: (source_word, target_lang) -> target_word
         self._translation_map: dict[tuple[str, str], str] = {}
-        # Lookup: entity_domain -> list of english_labels in that domain
+        # Lookup: domain -> list of source_words in that domain
         self._domain_entities: dict[str, list[str]] = {}
-        # Lookup: target_language -> set of target_labels (for cognate detection)
+        # Lookup: target_lang -> set of target_words (for cognate detection)
         self._lang_words: dict[str, set[str]] = {}
-        # All unique english labels
+        # All unique source words
         self._all_english: list[str] = []
-        # Lookup: english_label -> entity_domain
+        # Lookup: source_word -> domain
         self._entity_domains: dict[str, str] = {}
-        # Lookup: english_label -> qid
-        self._entity_qids: dict[str, str] = {}
 
     @property
     def name(self) -> str:
@@ -166,44 +163,60 @@ class LanguageGenerator(BaseGenerator):
         if self._data is not None:
             return
 
-        logger.info("Loading translation data from Wikidata...")
-        df = load_translations(
-            target_languages=self.target_languages,
-            min_languages_per_entity=self.min_languages_per_entity,
-            force_refresh=self.force_refresh,
-        )
+        logger.info("Loading translation data from MUSE dictionaries...")
+        dfs = []
+        for lang in self.target_languages:
+            try:
+                df = load_dictionary(
+                    source_lang="en",
+                    target_lang=lang,
+                    force_refresh=self.force_refresh,
+                )
+                dfs.append(df)
+            except Exception:
+                logger.warning("Failed to load MUSE dictionary for en-%s, skipping", lang)
 
-        if df.empty:
-            self._data = df
+        if not dfs:
+            self._data = pd.DataFrame()
             return
 
-        self._data = df
+        combined = pd.concat(dfs, ignore_index=True)
 
-        # Build lookup structures
+        # Tag domains via WordNet (best-effort)
+        combined = tag_domains(combined)
+
+        self._data = combined
+        self._build_lookups(combined)
+
+        logger.info(
+            "Translation data loaded: %d pairs, %d entities, %d languages, %d domains",
+            len(combined), len(self._all_english),
+            combined["target_lang"].nunique(), len(self._domain_entities),
+        )
+        for domain, entities in sorted(self._domain_entities.items()):
+            logger.info("  %s: %d entities", domain, len(entities))
+
+    def _build_lookups(self, df: pd.DataFrame) -> None:
+        """Build internal lookup structures from the loaded DataFrame."""
+        self._translation_map = {}
+        self._domain_entities = {}
+        self._lang_words = {}
+        self._entity_domains = {}
+
         for _, row in df.iterrows():
-            en = str(row["english_label"])
-            lang = str(row["target_language"])
-            target = str(row["target_label"])
-            domain = str(row["entity_domain"])
-            qid = str(row["qid"])
+            en = str(row["source_word"])
+            lang = str(row["target_lang"])
+            target = str(row["target_word"])
+            domain = str(row.get("domain", "other"))
 
             self._translation_map[(en, lang)] = target
             self._domain_entities.setdefault(domain, [])
             if en not in self._entity_domains:
                 self._domain_entities[domain].append(en)
             self._entity_domains[en] = domain
-            self._entity_qids[en] = qid
             self._lang_words.setdefault(lang, set()).add(target.lower())
 
         self._all_english = sorted(set(self._entity_domains.keys()))
-
-        logger.info(
-            "Translation data loaded: %d pairs, %d entities, %d languages, %d domains",
-            len(df), len(self._all_english),
-            df["target_language"].nunique(), len(self._domain_entities),
-        )
-        for domain, entities in sorted(self._domain_entities.items()):
-            logger.info("  %s: %d entities", domain, len(entities))
 
     # --- Helpers ---
 
@@ -300,7 +313,6 @@ class LanguageGenerator(BaseGenerator):
 
         for english in entities:
             domain = self._entity_domains[english]
-            qid = self._entity_qids[english]
 
             langs = list(self.target_languages)
             self.rng.shuffle(langs)
@@ -352,7 +364,7 @@ class LanguageGenerator(BaseGenerator):
                         generator=self.name,
                         template_id=template.id,
                         negation_strategy=strategy,
-                        source_synset=qid,
+                        source_synset=english,
                         target_synset=lang,
                     )
 
@@ -391,7 +403,6 @@ class LanguageGenerator(BaseGenerator):
 
         for english in entities:
             domain = self._entity_domains[english]
-            qid = self._entity_qids[english]
 
             langs = list(self.target_languages)
             self.rng.shuffle(langs)
@@ -438,7 +449,7 @@ class LanguageGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.REVERSE_RELATION.value,
-                    source_synset=qid,
+                    source_synset=english,
                     target_synset=lang,
                 )
 
@@ -450,8 +461,6 @@ class LanguageGenerator(BaseGenerator):
         self.rng.shuffle(entities)
 
         for english in entities:
-            qid = self._entity_qids[english]
-
             langs = list(self.target_languages)
             self.rng.shuffle(langs)
 
@@ -496,7 +505,7 @@ class LanguageGenerator(BaseGenerator):
                         generator=self.name,
                         template_id=template.id,
                         negation_strategy=NegationStrategy.DISTANT_SWAP.value,
-                        source_synset=qid,
+                        source_synset=english,
                         target_synset=true_lang,
                         neg_synset=false_lang,
                     )

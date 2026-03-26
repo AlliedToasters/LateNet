@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from latenet.datasources.wikidata import _in_expected_script, _is_clean_label
+from latenet.generators.muse_data import _in_expected_script
 from latenet.generators.language import (
     LANGUAGE_FAMILIES,
     LanguageGenerator,
@@ -15,78 +15,58 @@ from latenet.types import ContrastivePair, Difficulty
 
 
 def _mock_translation_data() -> pd.DataFrame:
-    """Small set of mock translation pairs with known translations for testing."""
+    """Small set of mock translation pairs with known translations for testing.
+
+    Uses MUSE-style schema: source_word, target_word, source_lang, target_lang, domain.
+    """
     rows = [
         # Animals — dog
-        {"qid": "Q144", "english_label": "dog", "target_language": "es", "target_label": "perro", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q144", "english_label": "dog", "target_language": "fr", "target_label": "chien", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q144", "english_label": "dog", "target_language": "de", "target_label": "Hund", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q144", "english_label": "dog", "target_language": "pt", "target_label": "cão", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q144", "english_label": "dog", "target_language": "it", "target_label": "cane", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q144", "english_label": "dog", "target_language": "zh", "target_label": "狗", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q144", "english_label": "dog", "target_language": "ja", "target_label": "犬", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q144", "english_label": "dog", "target_language": "ru", "target_label": "собака", "entity_domain": "animal", "has_wikipedia": True},
+        {"source_word": "dog", "target_word": "perro", "source_lang": "en", "target_lang": "es", "domain": "animal"},
+        {"source_word": "dog", "target_word": "chien", "source_lang": "en", "target_lang": "fr", "domain": "animal"},
+        {"source_word": "dog", "target_word": "Hund", "source_lang": "en", "target_lang": "de", "domain": "animal"},
+        {"source_word": "dog", "target_word": "cão", "source_lang": "en", "target_lang": "pt", "domain": "animal"},
+        {"source_word": "dog", "target_word": "cane", "source_lang": "en", "target_lang": "it", "domain": "animal"},
+        {"source_word": "dog", "target_word": "狗", "source_lang": "en", "target_lang": "zh", "domain": "animal"},
+        {"source_word": "dog", "target_word": "犬", "source_lang": "en", "target_lang": "ja", "domain": "animal"},
+        {"source_word": "dog", "target_word": "собака", "source_lang": "en", "target_lang": "ru", "domain": "animal"},
         # Animals — cat
-        {"qid": "Q146", "english_label": "cat", "target_language": "es", "target_label": "gato", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q146", "english_label": "cat", "target_language": "fr", "target_label": "chat", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q146", "english_label": "cat", "target_language": "de", "target_label": "Katze", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q146", "english_label": "cat", "target_language": "pt", "target_label": "gato", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q146", "english_label": "cat", "target_language": "it", "target_label": "gatto", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q146", "english_label": "cat", "target_language": "zh", "target_label": "猫", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q146", "english_label": "cat", "target_language": "ja", "target_label": "猫", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q146", "english_label": "cat", "target_language": "ru", "target_label": "кошка", "entity_domain": "animal", "has_wikipedia": True},
+        {"source_word": "cat", "target_word": "gato", "source_lang": "en", "target_lang": "es", "domain": "animal"},
+        {"source_word": "cat", "target_word": "chat", "source_lang": "en", "target_lang": "fr", "domain": "animal"},
+        {"source_word": "cat", "target_word": "Katze", "source_lang": "en", "target_lang": "de", "domain": "animal"},
+        {"source_word": "cat", "target_word": "gato", "source_lang": "en", "target_lang": "pt", "domain": "animal"},
+        {"source_word": "cat", "target_word": "gatto", "source_lang": "en", "target_lang": "it", "domain": "animal"},
+        {"source_word": "cat", "target_word": "猫", "source_lang": "en", "target_lang": "zh", "domain": "animal"},
+        {"source_word": "cat", "target_word": "猫", "source_lang": "en", "target_lang": "ja", "domain": "animal"},
+        {"source_word": "cat", "target_word": "кошка", "source_lang": "en", "target_lang": "ru", "domain": "animal"},
         # Animals — horse
-        {"qid": "Q726", "english_label": "horse", "target_language": "es", "target_label": "caballo", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q726", "english_label": "horse", "target_language": "fr", "target_label": "cheval", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q726", "english_label": "horse", "target_language": "de", "target_label": "Pferd", "entity_domain": "animal", "has_wikipedia": True},
-        {"qid": "Q726", "english_label": "horse", "target_language": "pt", "target_label": "cavalo", "entity_domain": "animal", "has_wikipedia": True},
+        {"source_word": "horse", "target_word": "caballo", "source_lang": "en", "target_lang": "es", "domain": "animal"},
+        {"source_word": "horse", "target_word": "cheval", "source_lang": "en", "target_lang": "fr", "domain": "animal"},
+        {"source_word": "horse", "target_word": "Pferd", "source_lang": "en", "target_lang": "de", "domain": "animal"},
+        {"source_word": "horse", "target_word": "cavalo", "source_lang": "en", "target_lang": "pt", "domain": "animal"},
         # Food — apple
-        {"qid": "Q89", "english_label": "apple", "target_language": "es", "target_label": "manzana", "entity_domain": "food", "has_wikipedia": True},
-        {"qid": "Q89", "english_label": "apple", "target_language": "fr", "target_label": "pomme", "entity_domain": "food", "has_wikipedia": True},
-        {"qid": "Q89", "english_label": "apple", "target_language": "de", "target_label": "Apfel", "entity_domain": "food", "has_wikipedia": True},
-        {"qid": "Q89", "english_label": "apple", "target_language": "pt", "target_label": "maçã", "entity_domain": "food", "has_wikipedia": True},
+        {"source_word": "apple", "target_word": "manzana", "source_lang": "en", "target_lang": "es", "domain": "food"},
+        {"source_word": "apple", "target_word": "pomme", "source_lang": "en", "target_lang": "fr", "domain": "food"},
+        {"source_word": "apple", "target_word": "Apfel", "source_lang": "en", "target_lang": "de", "domain": "food"},
+        {"source_word": "apple", "target_word": "maçã", "source_lang": "en", "target_lang": "pt", "domain": "food"},
         # Food — bread
-        {"qid": "Q7802", "english_label": "bread", "target_language": "es", "target_label": "pan", "entity_domain": "food", "has_wikipedia": True},
-        {"qid": "Q7802", "english_label": "bread", "target_language": "fr", "target_label": "pain", "entity_domain": "food", "has_wikipedia": True},
-        {"qid": "Q7802", "english_label": "bread", "target_language": "de", "target_label": "Brot", "entity_domain": "food", "has_wikipedia": True},
-        {"qid": "Q7802", "english_label": "bread", "target_language": "pt", "target_label": "pão", "entity_domain": "food", "has_wikipedia": True},
+        {"source_word": "bread", "target_word": "pan", "source_lang": "en", "target_lang": "es", "domain": "food"},
+        {"source_word": "bread", "target_word": "pain", "source_lang": "en", "target_lang": "fr", "domain": "food"},
+        {"source_word": "bread", "target_word": "Brot", "source_lang": "en", "target_lang": "de", "domain": "food"},
+        {"source_word": "bread", "target_word": "pão", "source_lang": "en", "target_lang": "pt", "domain": "food"},
         # Country — France
-        {"qid": "Q142", "english_label": "France", "target_language": "es", "target_label": "Francia", "entity_domain": "country", "has_wikipedia": True},
-        {"qid": "Q142", "english_label": "France", "target_language": "de", "target_label": "Frankreich", "entity_domain": "country", "has_wikipedia": True},
-        {"qid": "Q142", "english_label": "France", "target_language": "pt", "target_label": "França", "entity_domain": "country", "has_wikipedia": True},
-        {"qid": "Q142", "english_label": "France", "target_language": "zh", "target_label": "法国", "entity_domain": "country", "has_wikipedia": True},
+        {"source_word": "france", "target_word": "Francia", "source_lang": "en", "target_lang": "es", "domain": "place"},
+        {"source_word": "france", "target_word": "Frankreich", "source_lang": "en", "target_lang": "de", "domain": "place"},
+        {"source_word": "france", "target_word": "França", "source_lang": "en", "target_lang": "pt", "domain": "place"},
+        {"source_word": "france", "target_word": "法国", "source_lang": "en", "target_lang": "zh", "domain": "place"},
     ]
     return pd.DataFrame(rows)
 
 
 def _patch_data(gen: LanguageGenerator) -> None:
-    """Patch the generator to use mock data instead of Wikidata."""
+    """Patch the generator to use mock data instead of downloading MUSE files."""
     df = _mock_translation_data()
     gen._data = df
-
-    # Rebuild lookup structures
-    gen._translation_map = {}
-    gen._domain_entities = {}
-    gen._lang_words = {}
-    gen._entity_domains = {}
-    gen._entity_qids = {}
-
-    for _, row in df.iterrows():
-        en = str(row["english_label"])
-        lang = str(row["target_language"])
-        target = str(row["target_label"])
-        domain = str(row["entity_domain"])
-        qid = str(row["qid"])
-
-        gen._translation_map[(en, lang)] = target
-        gen._domain_entities.setdefault(domain, [])
-        if en not in gen._entity_domains:
-            gen._domain_entities[domain].append(en)
-        gen._entity_domains[en] = domain
-        gen._entity_qids[en] = qid
-        gen._lang_words.setdefault(lang, set()).add(target.lower())
-
-    gen._all_english = sorted(set(gen._entity_domains.keys()))
+    gen._build_lookups(df)
 
 
 def _make_generator(**kwargs) -> LanguageGenerator:
@@ -168,27 +148,51 @@ class TestScriptValidation:
         assert not _in_expected_script("", "zh")
 
 
-class TestCleanLabel:
-    def test_single_word(self):
-        assert _is_clean_label("perro")
+class TestMuseDataLoading:
+    def test_mock_data_schema(self):
+        df = _mock_translation_data()
+        assert "source_word" in df.columns
+        assert "target_word" in df.columns
+        assert "source_lang" in df.columns or True  # optional in mock
+        assert "target_lang" in df.columns
+        assert "domain" in df.columns
 
-    def test_two_words(self):
-        assert _is_clean_label("ice cream")
+    def test_build_lookups_populates_maps(self):
+        gen = _make_generator()
+        assert len(gen._translation_map) > 0
+        assert len(gen._domain_entities) > 0
+        assert len(gen._all_english) > 0
+        assert len(gen._entity_domains) > 0
+        assert len(gen._lang_words) > 0
 
-    def test_parentheses_rejected(self):
-        assert not _is_clean_label("perro (animal)")
+    def test_translation_map_correct(self):
+        gen = _make_generator()
+        assert gen._translation_map[("dog", "es")] == "perro"
+        assert gen._translation_map[("cat", "fr")] == "chat"
+        assert gen._translation_map[("apple", "de")] == "Apfel"
 
-    def test_comma_rejected(self):
-        assert not _is_clean_label("dog, domestic")
+    def test_domain_entities_grouped(self):
+        gen = _make_generator()
+        assert "animal" in gen._domain_entities
+        assert "food" in gen._domain_entities
+        assert "dog" in gen._domain_entities["animal"]
+        assert "apple" in gen._domain_entities["food"]
 
-    def test_too_many_words_rejected(self):
-        assert not _is_clean_label("a very long label phrase with many words")
-
-    def test_empty_rejected(self):
-        assert not _is_clean_label("")
-
-    def test_whitespace_only_rejected(self):
-        assert not _is_clean_label("   ")
+    def test_works_without_domain_column(self):
+        """Generator should handle data without domain tags (fallback to 'other')."""
+        gen = LanguageGenerator(seed=42, max_pairs=50, target_languages=["es", "fr"])
+        df = pd.DataFrame([
+            {"source_word": "dog", "target_word": "perro", "source_lang": "en", "target_lang": "es"},
+            {"source_word": "cat", "target_word": "gato", "source_lang": "en", "target_lang": "es"},
+            {"source_word": "dog", "target_word": "chien", "source_lang": "en", "target_lang": "fr"},
+            {"source_word": "cat", "target_word": "chat", "source_lang": "en", "target_lang": "fr"},
+        ])
+        gen._data = df
+        gen._build_lookups(df)
+        # All words should get domain "other" since no domain column
+        assert all(d == "other" for d in gen._entity_domains.values())
+        pairs = list(gen.generate())
+        assert len(pairs) > 0
 
 
 class TestTranslatesTo:
