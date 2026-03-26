@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-AVAILABLE_GENERATORS = ["wordnet", "geography", "chemistry", "biology", "temporal", "authorship", "language"]
+AVAILABLE_GENERATORS = ["wordnet", "geography", "chemistry", "biology", "temporal", "authorship", "language", "mathematics"]
 VALID_LEGS = {"ndif", "anthropic"}
 
 

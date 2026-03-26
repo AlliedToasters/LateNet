@@ -14,6 +14,7 @@ from latenet.generators.biology import BiologyGenerator
 from latenet.generators.temporal import TemporalGenerator
 from latenet.generators.authorship import AuthorshipGenerator
 from latenet.generators.language import LanguageGenerator
+from latenet.generators.mathematics import MathematicsGenerator
 
 # Registry of all available generators
 GENERATORS: dict[str, type[BaseGenerator]] = {
@@ -24,6 +25,7 @@ GENERATORS: dict[str, type[BaseGenerator]] = {
     "temporal": TemporalGenerator,
     "authorship": AuthorshipGenerator,
     "language": LanguageGenerator,
+    "mathematics": MathematicsGenerator,
 }
 
 
