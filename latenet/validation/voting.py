@@ -32,6 +32,7 @@ class RowVerdict:
     confidence: float | None = None
     raw: str | None = None
     error: str | None = None
+    awkward: bool | None = None
 
 
 @dataclass
@@ -228,8 +229,13 @@ SONNET_MODEL = "claude-sonnet-4-6"
 OPUS_MODEL = "claude-opus-4-6"
 
 JUDGE_PROMPT = (
-    "Is this statement true or false? "
-    "Answer with exactly one word: 'True' or 'False'.\n\n"
+    "Evaluate this statement on two axes:\n"
+    "1. **Factual accuracy**: Is the statement true or false?\n"
+    "2. **Phrasing quality**: Is the statement phrased naturally, or is it "
+    "awkward/absurd? Awkward means grammatically odd, uses incorrect articles, "
+    "or describes a relationship that is technically defensible but conceptually "
+    'nonsensical (e.g., "An organization has blue.").\n\n'
+    'Respond with JSON only: {{"verdict": "True" or "False", "awkward": true or false}}\n\n'
     "{statement}"
 )
 
@@ -240,24 +246,40 @@ def _query_anthropic(
     statement: str,
     max_retries: int = 3,
 ) -> RowVerdict:
-    """Query a single Anthropic model for a True/False judgment."""
+    """Query a single Anthropic model for a True/False judgment + phrasing quality."""
     for attempt in range(max_retries):
         try:
             response = client.messages.create(
                 model=model,
-                max_tokens=5,
+                max_tokens=50,
                 messages=[{
                     "role": "user",
                     "content": JUDGE_PROMPT.format(statement=statement),
                 }],
             )
-            text = response.content[0].text.strip().lower()
-            if "true" in text:
-                return RowVerdict(says_true=True, raw=text)
-            elif "false" in text:
-                return RowVerdict(says_true=False, raw=text)
-            else:
-                return RowVerdict(raw=text, error="ambiguous_response")
+            text = response.content[0].text.strip()
+            raw = text
+
+            # Parse JSON response
+            try:
+                parsed = json.loads(text)
+                verdict_str = str(parsed.get("verdict", "")).lower()
+                awkward = bool(parsed.get("awkward", False))
+                if "true" in verdict_str:
+                    return RowVerdict(says_true=True, raw=raw, awkward=awkward)
+                elif "false" in verdict_str:
+                    return RowVerdict(says_true=False, raw=raw, awkward=awkward)
+                else:
+                    return RowVerdict(raw=raw, error="ambiguous_verdict")
+            except (json.JSONDecodeError, TypeError):
+                # Fallback: parse as plain text (backward compat with Opus escalation)
+                text_lower = text.lower()
+                if "true" in text_lower:
+                    return RowVerdict(says_true=True, raw=raw)
+                elif "false" in text_lower:
+                    return RowVerdict(says_true=False, raw=raw)
+                else:
+                    return RowVerdict(raw=raw, error="ambiguous_response")
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
@@ -312,6 +334,7 @@ def run_anthropic_leg(
                 agrees_with_label=s.get("agrees_with_label"),
                 raw=s.get("raw"),
                 error=s.get("error"),
+                awkward=s.get("awkward"),
             )
         else:
             verdict = _query_anthropic(client, SONNET_MODEL, row["statement"], max_retries)
@@ -621,6 +644,7 @@ def run_parallel_validation(
                 agrees_with_label=s.get("agrees_with_label"),
                 raw=s.get("raw"),
                 error=s.get("error"),
+                awkward=s.get("awkward"),
             )
         else:
             sonnet_v = _query_anthropic(anthropic_client, SONNET_MODEL, row["statement"])
@@ -890,6 +914,7 @@ def _save_anthropic_checkpoint(path: Path, results: dict[int, dict[str, RowVerdi
                 "agrees_with_label": verdict.agrees_with_label,
                 "raw": verdict.raw,
                 "error": verdict.error,
+                "awkward": verdict.awkward,
             }
     _save_checkpoint(path, {
         "results": serializable,

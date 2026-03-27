@@ -74,6 +74,10 @@ def merge_verdicts(
             lambda i: anthropic_verdicts[i]["sonnet"].error
             if i in anthropic_verdicts else None
         )
+        out["sonnet_awkward"] = out.index.map(
+            lambda i: anthropic_verdicts[i]["sonnet"].awkward
+            if i in anthropic_verdicts else None
+        )
 
         # Opus (only present for escalated rows)
         def _opus_field(i: int, field: str) -> Any:
