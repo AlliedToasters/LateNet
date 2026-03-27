@@ -110,6 +110,7 @@ class GeographyGenerator(BaseGenerator):
         max_pairs: int | None = None,
         min_country_pop: int = 100_000,
         min_city_pop: int = 50_000,
+        min_proximity_pop: int = 200_000,
         lat_margin: float = 5.0,
         lon_margin: float = 10.0,
         distance_ratio: float = 3.0,
@@ -119,6 +120,7 @@ class GeographyGenerator(BaseGenerator):
         super().__init__(seed=seed, max_pairs=max_pairs)
         self.min_country_pop = min_country_pop
         self.min_city_pop = min_city_pop
+        self.min_proximity_pop = min_proximity_pop
         self.lat_margin = lat_margin
         self.lon_margin = lon_margin
         self.distance_ratio = distance_ratio
@@ -455,6 +457,10 @@ class GeographyGenerator(BaseGenerator):
     def _generate_proximity(self) -> Iterator[ContrastivePair]:
         """City A is closer to City B than to City C."""
         cities = self._cities
+        # Use higher population threshold for proximity to avoid obscure cities
+        # that LLMs have weak geographic representations for
+        if self.min_proximity_pop > self.min_city_pop:
+            cities = cities[cities["population"] >= self.min_proximity_pop]
         city_names = list(cities["name"])
         city_coords = {
             row["name"]: (row["latitude"], row["longitude"])

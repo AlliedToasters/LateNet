@@ -657,7 +657,7 @@ class MathematicsGenerator(BaseGenerator):
 
         # Build factor-count buckets for all numbers in range
         factor_counts: dict[int, int] = {}
-        for n in range(lo, min(hi + 1, 500)):
+        for n in range(lo, min(hi + 1, 50)):
             factor_counts[n] = num_factors(n)
 
         # Group numbers by factor count for hard-tier (similar counts) pairing
@@ -726,7 +726,7 @@ class MathematicsGenerator(BaseGenerator):
 
         # --- Easy tier: large factor ratio (highly composite vs primes) ---
         high_factor_nums = [n for n in _HIGHLY_COMPOSITE if lo <= n <= hi]
-        for n in range(lo, min(hi + 1, 500)):
+        for n in range(lo, min(hi + 1, 50)):
             if num_factors(n) >= 8:
                 high_factor_nums.append(n)
         high_factor_nums = sorted(set(high_factor_nums))
@@ -761,7 +761,7 @@ class MathematicsGenerator(BaseGenerator):
         lo, hi = self.property_range
 
         # Pool of numbers
-        pool = list(range(lo, min(hi + 1, 200)))
+        pool = list(range(lo, min(hi + 1, 100)))
         self.rng.shuffle(pool)
 
         # Bucket candidates by difficulty tier, then yield in balanced order

@@ -135,7 +135,7 @@ class TemporalGenerator(BaseGenerator):
         max_birth_year: int = 2000,
         force_refresh: bool = False,
         exclude_event_types: frozenset[str] = DEFAULT_EXCLUDE_EVENT_TYPES,
-        min_sitelinks: int = 10,
+        min_sitelinks: int = 20,
         prefer_recent: bool = True,
     ):
         super().__init__(seed=seed, max_pairs=max_pairs)

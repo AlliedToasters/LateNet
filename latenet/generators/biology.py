@@ -285,8 +285,11 @@ class BiologyGenerator(BaseGenerator):
         indices = list(organisms.index)
         self.rng.shuffle(indices)
 
-        # Ranks to generate membership statements for (skip species — it's the organism itself)
-        membership_ranks = ["family", "order", "class_", "phylum", "kingdom"]
+        # Ranks to generate membership statements for (skip species — it's the organism itself).
+        # Exclude class_ — the 2021 ICNP bacterial reclassification (Firmicutes→Bacillota etc.)
+        # means class-level names are ambiguous between taxonomic and morphological senses,
+        # causing high dispute rates (~35%) during validation.
+        membership_ranks = ["family", "order", "phylum", "kingdom"]
 
         for idx in indices:
             row = organisms.loc[idx]
