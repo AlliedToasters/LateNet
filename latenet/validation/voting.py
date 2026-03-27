@@ -557,9 +557,15 @@ def run_parallel_validation(
     # --- Per-row parallel loop ---
     logger.info("=== Per-row parallel validation: %d rows, legs=%s ===", len(df), legs)
     completed = 0
+    validation_start = time.monotonic()
+    row_times: list[float] = []
+    ndif_times: list[float] = []
+    anthropic_times: list[float] = []
+    opus_escalations = 0
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         for idx, row in df.iterrows():
+            row_start = time.monotonic()
             futures = {}
             if run_ndif:
                 futures["ndif"] = pool.submit(_ndif_one_row, idx, row)
@@ -567,10 +573,18 @@ def run_parallel_validation(
                 futures["anthropic"] = pool.submit(_anthropic_one_row, idx, row)
 
             if "ndif" in futures:
+                t0 = time.monotonic()
                 ndif_verdicts[idx] = futures["ndif"].result()
+                ndif_times.append(time.monotonic() - t0)
             if "anthropic" in futures:
+                t0 = time.monotonic()
                 anthropic_verdicts[idx] = futures["anthropic"].result()
+                anthropic_times.append(time.monotonic() - t0)
+                if "opus" in anthropic_verdicts[idx]:
+                    opus_escalations += 1
 
+            row_elapsed = time.monotonic() - row_start
+            row_times.append(row_elapsed)
             completed += 1
 
             # Per-row progress summary
@@ -592,11 +606,22 @@ def run_parallel_validation(
                     ov = av["opus"]
                     parts.append(f"opus={'T' if ov.says_true else 'F'}")
             logger.info(
-                "  [%d/%d] %s | %s",
-                completed, len(df),
+                "  [%d/%d] %.1fs %s | %s",
+                completed, len(df), row_elapsed,
                 " ".join(parts),
                 row["statement"][:60],
             )
+
+            # Periodic throughput summary every 25 rows
+            if completed % 25 == 0:
+                elapsed_so_far = time.monotonic() - validation_start
+                rate = completed / elapsed_so_far * 60
+                remaining = len(df) - completed
+                eta_min = remaining / (completed / elapsed_so_far) / 60
+                logger.info(
+                    "  --- %.1f rows/min | %d/%d done | ETA %.0f min ---",
+                    rate, completed, len(df), eta_min,
+                )
 
             # Checkpoint both legs after each row
             if ndif_checkpoint_path and run_ndif:
@@ -618,7 +643,35 @@ def run_parallel_validation(
             if anthropic_checkpoint_path and run_anthropic:
                 _save_anthropic_checkpoint(anthropic_checkpoint_path, anthropic_verdicts)
 
-    logger.info("Parallel validation complete: %d rows", completed)
+    total_elapsed = time.monotonic() - validation_start
+    logger.info("Parallel validation complete: %d rows in %.1fs", completed, total_elapsed)
+
+    # Timing summary
+    if row_times:
+        avg_row = sum(row_times) / len(row_times)
+        logger.info(
+            "  Timing: %.1fs/row avg, %.1fs/row median",
+            avg_row, sorted(row_times)[len(row_times) // 2],
+        )
+    if ndif_times:
+        logger.info(
+            "  NDIF:   %.2fs avg, %.2fs median",
+            sum(ndif_times) / len(ndif_times),
+            sorted(ndif_times)[len(ndif_times) // 2],
+        )
+    if anthropic_times:
+        logger.info(
+            "  Anthropic: %.2fs avg, %.2fs median (%d Opus escalations)",
+            sum(anthropic_times) / len(anthropic_times),
+            sorted(anthropic_times)[len(anthropic_times) // 2],
+            opus_escalations,
+        )
+    if total_elapsed > 0 and completed > 0:
+        logger.info(
+            "  Throughput: %.1f rows/min, ETA for 1000 rows: %.0f min",
+            completed / total_elapsed * 60,
+            1000 / (completed / total_elapsed) / 60,
+        )
 
     return (
         ndif_verdicts if run_ndif else None,

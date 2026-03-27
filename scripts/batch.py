@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -294,6 +295,7 @@ def main():
     logger.info("Ledger has %d existing statements for dedup", len(seen))
 
     # --- 2. Generate candidates ---
+    gen_start = time.monotonic()
     all_rows: list[dict] = []
     for gen_name in args.generators:
         if gen_name not in GENERATORS:
@@ -309,6 +311,7 @@ def main():
         gen = gen_cls(**kwargs)
         logger.info("Running %s generator (seed=%d, max_pairs=%d)...", gen_name, args.seed, args.max_pairs)
 
+        t0 = time.monotonic()
         count = 0
         dupes = 0
         for pair in gen.generate():
@@ -322,17 +325,22 @@ def main():
             all_rows.extend(pair.to_rows())
             count += 1
 
+        elapsed = time.monotonic() - t0
         if dupes > 0:
-            logger.info("  %s: %d unique pairs (%d duplicates skipped)", gen_name, count, dupes)
+            logger.info(
+                "  %s: %d unique pairs (%d dupes) in %.1fs",
+                gen_name, count, dupes, elapsed,
+            )
         else:
-            logger.info("  %s: %d pairs", gen_name, count)
+            logger.info("  %s: %d pairs in %.1fs", gen_name, count, elapsed)
 
     if not all_rows:
         logger.warning("No new rows generated.")
         return
 
+    gen_elapsed = time.monotonic() - gen_start
     candidates_df = pd.DataFrame(all_rows)
-    logger.info("Generated %d candidate rows total", len(candidates_df))
+    logger.info("Generated %d candidate rows total in %.1fs", len(candidates_df), gen_elapsed)
 
     # --- 3. Stamp provenance ---
     candidates_df = stamp_provenance(candidates_df, seed=args.seed)
