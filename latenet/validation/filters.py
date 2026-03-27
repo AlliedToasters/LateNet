@@ -60,46 +60,68 @@ def merge_verdicts(
             lambda i: ndif_verdicts[i].error if i in ndif_verdicts else None
         )
 
-    # Anthropic columns
+    # Anthropic columns — triple escalation: Haiku → Sonnet → Opus
     if anthropic_verdicts:
-        out["sonnet_says_true"] = out.index.map(
-            lambda i: anthropic_verdicts[i]["sonnet"].says_true
-            if i in anthropic_verdicts else None
-        )
-        out["sonnet_agrees"] = out.index.map(
-            lambda i: anthropic_verdicts[i]["sonnet"].agrees_with_label
-            if i in anthropic_verdicts else None
-        )
-        out["sonnet_error"] = out.index.map(
-            lambda i: anthropic_verdicts[i]["sonnet"].error
-            if i in anthropic_verdicts else None
-        )
-        out["sonnet_awkward"] = out.index.map(
-            lambda i: anthropic_verdicts[i]["sonnet"].awkward
-            if i in anthropic_verdicts else None
-        )
-
-        # Opus (only present for escalated rows)
-        def _opus_field(i: int, field: str) -> Any:
+        def _model_field(i: int, model: str, field: str) -> Any:
             if i not in anthropic_verdicts:
                 return None
-            opus = anthropic_verdicts[i].get("opus")
-            if opus is None:
+            v = anthropic_verdicts[i].get(model)
+            if v is None:
                 return None
-            return getattr(opus, field)
+            return getattr(v, field)
 
-        out["opus_says_true"] = out.index.map(lambda i: _opus_field(i, "says_true"))
-        out["opus_agrees"] = out.index.map(lambda i: _opus_field(i, "agrees_with_label"))
-        out["opus_error"] = out.index.map(lambda i: _opus_field(i, "error"))
+        # Haiku (always present)
+        out["haiku_says_true"] = out.index.map(lambda i: _model_field(i, "haiku", "says_true"))
+        out["haiku_agrees"] = out.index.map(lambda i: _model_field(i, "haiku", "agrees_with_label"))
+        out["haiku_error"] = out.index.map(lambda i: _model_field(i, "haiku", "error"))
+        out["haiku_awkward"] = out.index.map(lambda i: _model_field(i, "haiku", "awkward"))
 
-    # Contested flag: any validator disagreed with the label
+        # Sonnet (only present if Haiku disagreed)
+        out["sonnet_says_true"] = out.index.map(lambda i: _model_field(i, "sonnet", "says_true"))
+        out["sonnet_agrees"] = out.index.map(lambda i: _model_field(i, "sonnet", "agrees_with_label"))
+        out["sonnet_error"] = out.index.map(lambda i: _model_field(i, "sonnet", "error"))
+        out["sonnet_awkward"] = out.index.map(lambda i: _model_field(i, "sonnet", "awkward"))
+
+        # Opus (only present if Sonnet also disagreed)
+        out["opus_says_true"] = out.index.map(lambda i: _model_field(i, "opus", "says_true"))
+        out["opus_agrees"] = out.index.map(lambda i: _model_field(i, "opus", "agrees_with_label"))
+        out["opus_error"] = out.index.map(lambda i: _model_field(i, "opus", "error"))
+
+        # Awkward flag: from the highest-tier model that judged this row
+        def _best_awkward(i: int) -> bool | None:
+            if i not in anthropic_verdicts:
+                return None
+            av = anthropic_verdicts[i]
+            # Prefer Sonnet's awkward judgment if it escalated, else Haiku's
+            for model in ("sonnet", "haiku"):
+                v = av.get(model)
+                if v is not None and v.awkward is not None:
+                    return v.awkward
+            return None
+
+        out["sonnet_awkward"] = out.index.map(_best_awkward)
+
+    # Contested flag: Anthropic side uses the final model in the escalation chain.
+    # If only Haiku ran and agreed → clean. If Haiku disagreed and Sonnet agreed → clean.
+    # Contested = the highest-tier Anthropic model that ran disagreed with the label.
     contested = pd.Series(False, index=out.index)
 
     if "llama_agrees" in out.columns:
         contested = contested | (out["llama_agrees"] == False)  # noqa: E712
 
-    if "sonnet_agrees" in out.columns:
-        contested = contested | (out["sonnet_agrees"] == False)  # noqa: E712
+    if anthropic_verdicts:
+        def _anthropic_final_disagrees(i: int) -> bool:
+            if i not in anthropic_verdicts:
+                return False
+            av = anthropic_verdicts[i]
+            # Check models in reverse priority: opus > sonnet > haiku
+            for model in ("opus", "sonnet", "haiku"):
+                v = av.get(model)
+                if v is not None and v.agrees_with_label is not None:
+                    return v.agrees_with_label is False
+            return False
+
+        contested = contested | out.index.map(_anthropic_final_disagrees)
 
     out["contested"] = contested
     return out

@@ -225,6 +225,7 @@ def run_ndif_leg(
 # Anthropic leg (Sonnet + Opus escalation)
 # ---------------------------------------------------------------------------
 
+HAIKU_MODEL = "claude-haiku-4-5-20251001"
 SONNET_MODEL = "claude-sonnet-4-6"
 OPUS_MODEL = "claude-opus-4-6"
 
@@ -259,6 +260,13 @@ def _query_anthropic(
             )
             text = response.content[0].text.strip()
             raw = text
+
+            # Strip markdown code fences (Haiku wraps JSON in ```json...```)
+            if text.startswith("```"):
+                lines = text.split("\n")
+                text = "\n".join(
+                    l for l in lines if not l.startswith("```")
+                ).strip()
 
             # Parse JSON response
             try:
@@ -636,37 +644,56 @@ def run_parallel_validation(
         str_idx = str(idx)
         result: dict[str, RowVerdict] = {}
 
-        # Sonnet
-        if str_idx in existing_anthropic and "sonnet" in existing_anthropic[str_idx]:
-            s = existing_anthropic[str_idx]["sonnet"]
-            sonnet_v = RowVerdict(
-                says_true=s.get("says_true"),
-                agrees_with_label=s.get("agrees_with_label"),
-                raw=s.get("raw"),
-                error=s.get("error"),
-                awkward=s.get("awkward"),
+        label = bool(row["label"])
+
+        # --- Haiku (first pass — cheap, handles ~85% of rows) ---
+        if str_idx in existing_anthropic and "haiku" in existing_anthropic[str_idx]:
+            h = existing_anthropic[str_idx]["haiku"]
+            haiku_v = RowVerdict(
+                says_true=h.get("says_true"),
+                agrees_with_label=h.get("agrees_with_label"),
+                raw=h.get("raw"),
+                error=h.get("error"),
+                awkward=h.get("awkward"),
             )
         else:
-            sonnet_v = _query_anthropic(anthropic_client, SONNET_MODEL, row["statement"])
-            if sonnet_v.says_true is not None:
-                sonnet_v.agrees_with_label = sonnet_v.says_true == bool(row["label"])
-        result["sonnet"] = sonnet_v
+            haiku_v = _query_anthropic(anthropic_client, HAIKU_MODEL, row["statement"])
+            if haiku_v.says_true is not None:
+                haiku_v.agrees_with_label = haiku_v.says_true == label
+        result["haiku"] = haiku_v
 
-        # Opus escalation if Sonnet disagreed
-        if sonnet_v.agrees_with_label is False:
-            if str_idx in existing_anthropic and "opus" in existing_anthropic.get(str_idx, {}):
-                o = existing_anthropic[str_idx]["opus"]
-                opus_v = RowVerdict(
-                    says_true=o.get("says_true"),
-                    agrees_with_label=o.get("agrees_with_label"),
-                    raw=o.get("raw"),
-                    error=o.get("error"),
+        # --- Sonnet (escalation if Haiku disagreed) ---
+        if haiku_v.agrees_with_label is False:
+            if str_idx in existing_anthropic and "sonnet" in existing_anthropic[str_idx]:
+                s = existing_anthropic[str_idx]["sonnet"]
+                sonnet_v = RowVerdict(
+                    says_true=s.get("says_true"),
+                    agrees_with_label=s.get("agrees_with_label"),
+                    raw=s.get("raw"),
+                    error=s.get("error"),
+                    awkward=s.get("awkward"),
                 )
             else:
-                opus_v = _query_anthropic(anthropic_client, OPUS_MODEL, row["statement"])
-                if opus_v.says_true is not None:
-                    opus_v.agrees_with_label = opus_v.says_true == bool(row["label"])
-            result["opus"] = opus_v
+                sonnet_v = _query_anthropic(anthropic_client, SONNET_MODEL, row["statement"])
+                if sonnet_v.says_true is not None:
+                    sonnet_v.agrees_with_label = sonnet_v.says_true == label
+            result["sonnet"] = sonnet_v
+
+            # --- Opus (escalation if Sonnet also disagreed) ---
+            if sonnet_v.agrees_with_label is False:
+                if str_idx in existing_anthropic and "opus" in existing_anthropic.get(str_idx, {}):
+                    o = existing_anthropic[str_idx]["opus"]
+                    opus_v = RowVerdict(
+                        says_true=o.get("says_true"),
+                        agrees_with_label=o.get("agrees_with_label"),
+                        raw=o.get("raw"),
+                        error=o.get("error"),
+                    )
+                else:
+                    opus_v = _query_anthropic(anthropic_client, OPUS_MODEL, row["statement"])
+                    if opus_v.says_true is not None:
+                        opus_v.agrees_with_label = opus_v.says_true == label
+                result["opus"] = opus_v
 
         return result
 
@@ -684,6 +711,7 @@ def run_parallel_validation(
     row_times: list[float] = []
     ndif_times: list[float] = []
     anthropic_times: list[float] = []
+    sonnet_escalations = 0
     opus_escalations = 0
 
     if effective_concurrency <= 1:
@@ -705,6 +733,8 @@ def run_parallel_validation(
                     t0 = time.monotonic()
                     anthropic_verdicts[idx] = futures["anthropic"].result()
                     anthropic_times.append(time.monotonic() - t0)
+                    if "sonnet" in anthropic_verdicts[idx]:
+                        sonnet_escalations += 1
                     if "opus" in anthropic_verdicts[idx]:
                         opus_escalations += 1
 
@@ -722,14 +752,15 @@ def run_parallel_validation(
                         parts.append(f"ndif={'T' if nv.says_true else 'F'} conf={nv.confidence:.1f}")
                 if run_anthropic:
                     av = anthropic_verdicts.get(idx, {})
-                    sv = av.get("sonnet")
-                    if sv and sv.error:
-                        parts.append(f"sonnet={sv.error}")
-                    elif sv:
-                        parts.append(f"sonnet={'T' if sv.says_true else 'F'}")
-                    if "opus" in av:
-                        ov = av["opus"]
-                        parts.append(f"opus={'T' if ov.says_true else 'F'}")
+                    for model in ("haiku", "sonnet", "opus"):
+                        mv = av.get(model)
+                        if mv and mv.error:
+                            parts.append(f"{model}={mv.error}")
+                        elif mv:
+                            tag = f"{'T' if mv.says_true else 'F'}"
+                            if mv.awkward:
+                                tag += "!"
+                            parts.append(f"{model}={tag}")
                 logger.info(
                     "  [%d/%d] %.1fs %s | %s",
                     completed, len(df), row_elapsed,
@@ -804,6 +835,8 @@ def run_parallel_validation(
                     t0 = time.monotonic()
                     anthropic_verdicts[idx] = fut.result()
                     anthropic_times.append(time.monotonic() - t0)
+                    if "sonnet" in anthropic_verdicts[idx]:
+                        sonnet_escalations += 1
                     if "opus" in anthropic_verdicts[idx]:
                         opus_escalations += 1
 
@@ -821,14 +854,15 @@ def run_parallel_validation(
                         parts.append(f"ndif={'T' if nv.says_true else 'F'} conf={nv.confidence:.1f}")
                 if run_anthropic:
                     av = anthropic_verdicts.get(idx, {})
-                    sv = av.get("sonnet")
-                    if sv and sv.error:
-                        parts.append(f"sonnet={sv.error}")
-                    elif sv:
-                        parts.append(f"sonnet={'T' if sv.says_true else 'F'}")
-                    if "opus" in av:
-                        ov = av["opus"]
-                        parts.append(f"opus={'T' if ov.says_true else 'F'}")
+                    for model in ("haiku", "sonnet", "opus"):
+                        mv = av.get(model)
+                        if mv and mv.error:
+                            parts.append(f"{model}={mv.error}")
+                        elif mv:
+                            tag = f"{'T' if mv.says_true else 'F'}"
+                            if mv.awkward:
+                                tag += "!"
+                            parts.append(f"{model}={tag}")
                 logger.info(
                     "  [%d/%d] %s | %s",
                     completed, len(df),
@@ -885,10 +919,10 @@ def run_parallel_validation(
         )
     if anthropic_times:
         logger.info(
-            "  Anthropic: %.2fs avg, %.2fs median (%d Opus escalations)",
+            "  Anthropic: %.2fs avg, %.2fs median (Haiku→Sonnet: %d, Sonnet→Opus: %d)",
             sum(anthropic_times) / len(anthropic_times),
             sorted(anthropic_times)[len(anthropic_times) // 2],
-            opus_escalations,
+            sonnet_escalations, opus_escalations,
         )
     if total_elapsed > 0 and completed > 0:
         logger.info(
