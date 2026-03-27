@@ -17,14 +17,21 @@ _engine = inflect.engine()
 _article_cache: dict[str, str] = {}
 
 
-def resolve_article(entity: str) -> str:
+def resolve_article(entity: str, synset_name: str | None = None) -> str:
     """Return 'a {entity}' or 'an {entity}' with correct article.
 
     Uses inflect for reliable a/an resolution. Handles edge cases
     like silent-h words, consonant-sound vowel words, etc.
+
+    If *synset_name* is provided and belongs to the uncountable set,
+    the bare entity is returned without an article.
     """
     if not entity:
         return entity
+    if synset_name is not None:
+        from latenet.countability import UNCOUNTABLE_SYNSETS
+        if synset_name in UNCOUNTABLE_SYNSETS:
+            return entity
     if entity in _article_cache:
         return _article_cache[entity]
     result = _engine.a(entity)
@@ -62,7 +69,12 @@ def sanitize_statement(text: str) -> str:
 _ARTICLE_SLOT_RE = re.compile(r"\{a_(\w+)\}")
 
 
-def render_template(pattern: str, **kwargs: str) -> str:
+def render_template(
+    pattern: str,
+    *,
+    synset_map: dict[str, str] | None = None,
+    **kwargs: str,
+) -> str:
     """Render a template pattern with article-aware slot resolution.
 
     Slots named ``{a_X}`` are resolved by looking up the value for ``X``
@@ -70,6 +82,10 @@ def render_template(pattern: str, **kwargs: str) -> str:
     correct 'a'/'an' + value string.
 
     Regular ``{X}`` slots are filled via standard str.format().
+
+    If *synset_map* is provided, it maps slot names (e.g. ``"entity"``,
+    ``"category"``) to WordNet synset names.  When an ``{a_X}`` slot's
+    synset is in the uncountable set, the article is omitted.
 
     Example::
 
@@ -80,5 +96,8 @@ def render_template(pattern: str, **kwargs: str) -> str:
     for match in _ARTICLE_SLOT_RE.finditer(pattern):
         base_slot = match.group(1)
         if base_slot in kwargs:
-            expanded[f"a_{base_slot}"] = resolve_article(kwargs[base_slot])
+            sname = synset_map.get(base_slot) if synset_map else None
+            expanded[f"a_{base_slot}"] = resolve_article(
+                kwargs[base_slot], synset_name=sname,
+            )
     return pattern.format(**expanded)

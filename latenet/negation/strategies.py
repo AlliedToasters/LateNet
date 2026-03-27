@@ -19,16 +19,20 @@ def _swap_target_name(
 ) -> str:
     """Render a statement with the target replaced by neg_synset's lemma name."""
     neg_name = neg_synset.lemma_names()[0].replace("_", " ")
-    slots = slot_values_for_relationship(template, relationship)
+    slots, synset_map = slot_values_for_relationship(template, relationship)
     if template.rel_type == RelationshipType.HYPERNYMY:
         slots["category"] = neg_name
+        synset_map["category"] = neg_synset.name()
     elif template.rel_type == RelationshipType.MERONYMY:
         slots["part"] = neg_name
+        synset_map["part"] = neg_synset.name()
     elif template.rel_type == RelationshipType.SIBLING:
         slots["entity_b"] = neg_name
+        synset_map["entity_b"] = neg_synset.name()
     elif template.rel_type == RelationshipType.ANTONYMY:
         slots["word_b"] = neg_name
-    return render(template, slots)
+        synset_map["word_b"] = neg_synset.name()
+    return render(template, slots, synset_map=synset_map)
 
 
 def sibling_swap(
@@ -65,9 +69,14 @@ def direct_negation(
     stmt = re.sub(r"\bis a\b", "is not a", stmt, count=1)
     stmt = re.sub(r"\bis an\b", "is not an", stmt, count=1)
     stmt = re.sub(r"\bhas a\b", "does not have a", stmt, count=1)
+    stmt = re.sub(r"\bhas an\b", "does not have an", stmt, count=1)
     stmt = re.sub(r"\bare both\b", "are not both", stmt, count=1)
     stmt = re.sub(r"\bare antonyms\b", "are not antonyms", stmt, count=1)
     stmt = re.sub(r"\bbelongs to\b", "does not belong to", stmt, count=1)
+
+    # Bare "has" without article (uncountable nouns: "Outer space has interstellar space")
+    if stmt == true_statement:
+        stmt = re.sub(r"\bhas\b", "does not have", stmt, count=1)
 
     if stmt == true_statement:
         stmt = f"It is not true that {true_statement[0].lower()}{true_statement[1:]}"
@@ -83,14 +92,16 @@ def reverse_relation(
     if template.rel_type not in (RelationshipType.HYPERNYMY, RelationshipType.MERONYMY):
         return None
 
-    slots = slot_values_for_relationship(template, relationship)
+    slots, synset_map = slot_values_for_relationship(template, relationship)
 
     if template.rel_type == RelationshipType.HYPERNYMY:
         slots["entity"], slots["category"] = slots["category"], slots["entity"]
+        synset_map["entity"], synset_map["category"] = synset_map["category"], synset_map["entity"]
     elif template.rel_type == RelationshipType.MERONYMY:
         slots["whole"], slots["part"] = slots["part"], slots["whole"]
+        synset_map["whole"], synset_map["part"] = synset_map["part"], synset_map["whole"]
 
-    stmt = render(template, slots)
+    stmt = render(template, slots, synset_map=synset_map)
     return stmt, NegationStrategy.REVERSE_RELATION, None
 
 

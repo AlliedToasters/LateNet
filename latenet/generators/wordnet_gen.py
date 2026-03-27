@@ -97,8 +97,8 @@ class WordNetGenerator(BaseGenerator):
 
         templates = get_templates(rel.rel_type)
         for template in templates:
-            slots = slot_values_for_relationship(template, rel)
-            true_statement = render(template, slots)
+            slots, synset_map = slot_values_for_relationship(template, rel)
+            true_statement = render(template, slots, synset_map=synset_map)
 
             negations = apply_negation(rel, template, true_statement, self.rng)
             if len(negations) > self.max_false_per_true:

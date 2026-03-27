@@ -79,25 +79,56 @@ def get_templates(rel_type: RelationshipType) -> list[Template]:
     return TEMPLATES.get(rel_type, [])
 
 
-def render(template: Template, slot_values: dict[str, str]) -> str:
-    """Fill template slots with values, resolving {a_X} article tokens."""
-    return _render_template(template.pattern, **slot_values)
+def render(
+    template: Template,
+    slot_values: dict[str, str],
+    synset_map: dict[str, str] | None = None,
+) -> str:
+    """Fill template slots with values, resolving {a_X} article tokens.
+
+    If *synset_map* is provided, it maps slot names to WordNet synset names
+    so that uncountable nouns can skip the indefinite article.
+    """
+    return _render_template(template.pattern, synset_map=synset_map, **slot_values)
 
 
-def slot_values_for_relationship(template: Template, relationship) -> dict[str, str]:
-    """Build slot values dict from a Relationship, based on the template's rel_type."""
+def slot_values_for_relationship(
+    template: Template, relationship,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Build slot values and synset map from a Relationship.
+
+    Returns ``(slot_values, synset_map)`` where *synset_map* maps slot
+    names to WordNet synset name strings (e.g. ``"dog.n.01"``).  The
+    synset map is used by :func:`render` to skip indefinite articles for
+    uncountable nouns.
+    """
     from latenet.types import Relationship
 
     rel: Relationship = relationship
     if template.rel_type == RelationshipType.HYPERNYMY:
-        return {"entity": rel.source_name, "category": rel.target_name}
+        slots = {"entity": rel.source_name, "category": rel.target_name}
+        smap = {"entity": rel.source.name(), "category": rel.target.name()}
+        return slots, smap
     elif template.rel_type == RelationshipType.MERONYMY:
-        return {"whole": rel.source_name, "part": rel.target_name}
+        slots = {"whole": rel.source_name, "part": rel.target_name}
+        smap = {"whole": rel.source.name(), "part": rel.target.name()}
+        return slots, smap
     elif template.rel_type == RelationshipType.SIBLING:
         parents = rel.source.hypernyms()
-        parent_name = parents[0].lemma_names()[0].replace("_", " ") if parents else "thing"
-        return {"entity_a": rel.source_name, "entity_b": rel.target_name, "parent": parent_name}
+        parent_synset = parents[0] if parents else None
+        parent_name = parent_synset.lemma_names()[0].replace("_", " ") if parent_synset else "thing"
+        slots = {"entity_a": rel.source_name, "entity_b": rel.target_name, "parent": parent_name}
+        smap = {
+            "entity_a": rel.source.name(),
+            "entity_b": rel.target.name(),
+            "parent": parent_synset.name() if parent_synset else "",
+        }
+        return slots, smap
     elif template.rel_type == RelationshipType.ANTONYMY:
-        return {"word_a": rel.source_name, "word_b": rel.target_name}
+        slots = {"word_a": rel.source_name, "word_b": rel.target_name}
+        smap = {"word_a": rel.source.name(), "word_b": rel.target.name()}
+        return slots, smap
     else:
-        return {"entity": rel.source_name, "category": rel.target_name}
+        slots = {"entity": rel.source_name, "category": rel.target_name}
+        smap = {"entity": rel.source.name(), "category": rel.target.name()}
+        return slots, smap
