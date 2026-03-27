@@ -27,6 +27,74 @@ DEFAULT_TIMEOUT = 120
 MAX_RETRIES = 3
 RATE_LIMIT_SECONDS = 1.0
 
+# ---------------------------------------------------------------------------
+# wikistash local backend (optional)
+# ---------------------------------------------------------------------------
+
+_wikistash_stash = None
+_wikistash_checked = False
+
+
+def _get_wikistash():
+    """Lazily initialize wikistash connection. Returns None if unavailable."""
+    global _wikistash_stash, _wikistash_checked
+    if _wikistash_checked:
+        return _wikistash_stash
+    _wikistash_checked = True
+
+    # Check for WIKISTASH_DB env var or well-known paths
+    import os
+    db_path = os.environ.get("WIKISTASH_DB")
+    if not db_path:
+        # Check common relative paths
+        for candidate in [
+            Path("../../wikistash/wikistash_partial.duckdb"),
+            Path("../wikistash/wikistash_partial.duckdb"),
+            Path.home() / "wikistash" / "wikistash_partial.duckdb",
+        ]:
+            if candidate.exists():
+                db_path = str(candidate)
+                break
+
+    if not db_path:
+        logger.debug("wikistash not found — using remote Wikidata SPARQL endpoint")
+        return None
+
+    try:
+        from wikistash import Stash
+        _wikistash_stash = Stash(
+            local_db_path=db_path,
+            enable_live_fallback=False,
+        )
+        logger.info("wikistash connected: %s", db_path)
+        return _wikistash_stash
+    except Exception as e:
+        logger.warning("wikistash available but failed to connect: %s", e)
+        return None
+
+
+def _run_wikistash_query(query: str) -> pd.DataFrame | None:
+    """Try to run a SPARQL query via wikistash. Returns None on failure."""
+    stash = _get_wikistash()
+    if stash is None:
+        return None
+
+    try:
+        data = stash.sparql_json(query)
+        bindings = data.get("results", {}).get("bindings", [])
+        if not bindings:
+            return pd.DataFrame()
+        rows = []
+        for b in bindings:
+            row = {}
+            for key, val in b.items():
+                row[key] = val.get("value", "")
+            rows.append(row)
+        return pd.DataFrame(rows)
+    except Exception as e:
+        logger.warning("wikistash query failed, falling back to remote: %s", e)
+        return None
+
 
 # ---------------------------------------------------------------------------
 # SPARQL client
@@ -91,12 +159,23 @@ def sparql_query(
 ) -> pd.DataFrame:
     """Execute a SPARQL query against Wikidata and return results as a DataFrame.
 
+    Tries wikistash (local) first, falls back to remote SPARQL endpoint.
     Results are cached as parquet files keyed by query hash.
     """
     cp = _cache_path(query)
     if not force_refresh and cp.exists():
         logger.info("Cache hit for query %s", _cache_key(query)[:12])
         return pd.read_parquet(cp)
+
+    # Try wikistash first (local, fast, no rate limits)
+    local_result = _run_wikistash_query(query)
+    if local_result is not None:
+        logger.info("wikistash returned %d rows for query %s", len(local_result), _cache_key(query)[:12])
+        # Cache the result same as remote
+        _ensure_cache_dir()
+        local_result.to_parquet(cp, index=False)
+        _update_manifest(query, len(local_result))
+        return local_result
 
     logger.debug("SPARQL query:\n%s", query)
     logger.info("Cache miss for query %s, fetching from Wikidata...", _cache_key(query)[:12])
@@ -168,12 +247,25 @@ def sparql_query_paginated(
     """Execute a paginated SPARQL query using {limit} and {offset} placeholders.
 
     Concatenates all pages into a single DataFrame and caches the final result.
+    When wikistash is available, runs the full query locally (no pagination needed).
     """
     # Cache the full result by hashing the template
     cp = _cache_path(query_template)
     if not force_refresh and cp.exists():
         logger.info("Cache hit for paginated query %s", _cache_key(query_template)[:12])
         return pd.read_parquet(cp)
+
+    # Try wikistash — run full query without pagination (local is fast enough)
+    # Fill in a large LIMIT and OFFSET=0 to satisfy the template placeholders
+    local_query = query_template.format(limit=1_000_000, offset=0)
+    local_result = _run_wikistash_query(local_query)
+    if local_result is not None:
+        logger.info("wikistash returned %d rows for paginated query %s",
+                     len(local_result), _cache_key(query_template)[:12])
+        _ensure_cache_dir()
+        local_result.to_parquet(cp, index=False)
+        _update_manifest(query_template, len(local_result))
+        return local_result
 
     logger.info("Starting paginated query %s...", _cache_key(query_template)[:12])
 
