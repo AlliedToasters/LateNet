@@ -143,6 +143,14 @@ class WordNetGenerator(BaseGenerator):
                     source_synset=rel.source.name(),
                     target_synset=rel.target.name(),
                     neg_synset=neg_synset.name() if neg_synset else None,
+                    gen_params={
+                        "source_synset": rel.source.name(),
+                        "target_synset": rel.target.name(),
+                        "neg_synset": neg_synset.name() if neg_synset else None,
+                        "semantic_distance": dist,
+                        "source_name": rel.source_name,
+                        "target_name": rel.target_name,
+                    },
                 )
 
     def generate(self) -> Iterator[ContrastivePair]:

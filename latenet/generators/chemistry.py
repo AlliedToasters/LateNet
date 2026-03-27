@@ -397,6 +397,12 @@ class ChemistryGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=strategy,
+                    gen_params={
+                        "element": name,
+                        "true_symbol": symbol,
+                        "false_symbol": swap_el["symbol"],
+                        "atomic_number": int(el_row["atomic_number"]),
+                    },
                 )
 
     # --- Group/series membership ---
@@ -462,6 +468,12 @@ class ChemistryGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.SIBLING_SWAP.value,
+                    gen_params={
+                        "element": el_name,
+                        "true_series": series_label,
+                        "false_series": hard_series,
+                        "atomic_number": int(el_row["atomic_number"]),
+                    },
                 )
                 swaps_emitted += 1
 
@@ -485,6 +497,12 @@ class ChemistryGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.DISTANT_SWAP.value,
+                    gen_params={
+                        "element": el_name,
+                        "true_series": series_label,
+                        "false_series": easy_series,
+                        "atomic_number": int(el_row["atomic_number"]),
+                    },
                 )
 
     # --- State of matter ---
@@ -529,6 +547,12 @@ class ChemistryGenerator(BaseGenerator):
                 generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.SIBLING_SWAP.value,
+                gen_params={
+                    "element": el_name,
+                    "true_state": true_state,
+                    "false_state": hard_state,
+                    "atomic_number": int(el_row["atomic_number"]),
+                },
             )
 
             # Easy: maximally different state
@@ -555,6 +579,12 @@ class ChemistryGenerator(BaseGenerator):
                 generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.DISTANT_SWAP.value,
+                gen_params={
+                    "element": el_name,
+                    "true_state": true_state,
+                    "false_state": easy_state,
+                    "atomic_number": int(el_row["atomic_number"]),
+                },
             )
 
     # --- Block membership ---
@@ -606,6 +636,12 @@ class ChemistryGenerator(BaseGenerator):
                 generator=self.name,
                 template_id=template.id,
                 negation_strategy=strategy,
+                gen_params={
+                    "element": el_name,
+                    "true_block": true_block,
+                    "false_block": wrong,
+                    "atomic_number": int(el_row["atomic_number"]),
+                },
             )
 
     # --- Atomic number magnitude ---
@@ -658,6 +694,12 @@ class ChemistryGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                    gen_params={
+                        "big_element": big,
+                        "small_element": small,
+                        "big_z": int(z_big),
+                        "small_z": int(z_small),
+                    },
                 )
 
     # --- Property comparisons ---
@@ -718,4 +760,11 @@ class ChemistryGenerator(BaseGenerator):
                         generator=self.name,
                         template_id=template.id,
                         negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                        gen_params={
+                            "big_element": big,
+                            "small_element": small,
+                            "property": prop_col,
+                            "big_value": float(v_big),
+                            "small_value": float(v_small),
+                        },
                     )

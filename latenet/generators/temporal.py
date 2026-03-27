@@ -314,6 +314,13 @@ class TemporalGenerator(BaseGenerator):
                 generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                gen_params={
+                    "event_a": name_a,
+                    "event_b": name_b,
+                    "year_a": year_a,
+                    "year_b": year_b,
+                    "gap_years": gap,
+                },
             )
 
     # --- Birth ordering ---
@@ -381,6 +388,13 @@ class TemporalGenerator(BaseGenerator):
                 generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                gen_params={
+                    "person_a": name_a,
+                    "person_b": name_b,
+                    "year_a": year_a,
+                    "year_b": year_b,
+                    "gap_years": gap,
+                },
             )
 
     # --- Century attribution ---
@@ -477,6 +491,14 @@ class TemporalGenerator(BaseGenerator):
                 generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.DISTANT_SWAP.value,
+                gen_params={
+                    "entity": name,
+                    "entity_type": entity_type,
+                    "year": year,
+                    "true_century": century,
+                    "false_century": false_century_num,
+                    "century_gap": century_gap,
+                },
             )
 
     # --- Era ordering (person lived before event) ---
@@ -566,6 +588,13 @@ class TemporalGenerator(BaseGenerator):
                 generator=self.name,
                 template_id=template.id,
                 negation_strategy=strategy,
+                gen_params={
+                    "person": person_name,
+                    "event": event_name,
+                    "death_year": death_year,
+                    "event_year": event_year,
+                    "gap_years": gap,
+                },
             )
 
     # --- Contemporaneity ---
@@ -641,6 +670,15 @@ class TemporalGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.DISTANT_SWAP.value,
+                    gen_params={
+                        "person_a": name_a,
+                        "person_b": name_b,
+                        "birth_a": birth_a,
+                        "death_a": death_a,
+                        "birth_b": birth_b,
+                        "death_b": death_b,
+                        "overlap_years": overlap,
+                    },
                 )
 
     def _find_non_contemporary(

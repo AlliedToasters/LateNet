@@ -220,6 +220,11 @@ class AstronomyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=strategy,
+                    gen_params={
+                        "moon": moon.name,
+                        "true_parent": true_parent,
+                        "false_parent": wrong_parent,
+                    },
                 )
 
         # Planet-Sun pairs (reverse relation: "{planet} orbits the Sun" / "{planet} orbits Jupiter")
@@ -248,6 +253,11 @@ class AstronomyGenerator(BaseGenerator):
                 generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.DISTANT_SWAP.value,
+                gen_params={
+                    "planet": planet.name,
+                    "true_parent": "Sun",
+                    "false_parent": wrong.name,
+                },
             )
 
     def _orbit_swaps(
@@ -337,6 +347,11 @@ class AstronomyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                    gen_params={
+                        "closer_planet": closer.name,
+                        "farther_planet": farther.name,
+                        "order_gap": gap,
+                    },
                 )
 
         # Ordinal position statements
@@ -374,6 +389,11 @@ class AstronomyGenerator(BaseGenerator):
                 generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.SIBLING_SWAP.value,
+                gen_params={
+                    "planet": planet.name,
+                    "true_ordinal": planet.order_from_sun,
+                    "false_ordinal": wrong_order,
+                },
             )
 
     # --- Property magnitude ---
@@ -448,6 +468,14 @@ class AstronomyGenerator(BaseGenerator):
                         generator=self.name,
                         template_id=template.id,
                         negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                        gen_params={
+                            "big": big.name,
+                            "small": small.name,
+                            "property": prop_key,
+                            "big_value": float(v_big),
+                            "small_value": float(v_small),
+                            "ratio": round(ratio, 2),
+                        },
                     )
 
     # --- Classification ---
@@ -515,6 +543,11 @@ class AstronomyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=strategy,
+                    gen_params={
+                        "body": body.name,
+                        "true_type": true_type,
+                        "false_type": wrong,
+                    },
                 )
 
     # --- Stellar properties ---
@@ -561,6 +594,12 @@ class AstronomyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                    gen_params={
+                        "brighter_star": brighter.name,
+                        "dimmer_star": dimmer.name,
+                        "property": "apparent_magnitude",
+                        "magnitude_diff": round(mag_diff, 2),
+                    },
                 )
 
         # Distance comparisons
@@ -600,6 +639,12 @@ class AstronomyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                    gen_params={
+                        "closer_star": closer.name,
+                        "farther_star": farther.name,
+                        "property": "distance_ly",
+                        "distance_ratio": round(ratio, 2),
+                    },
                 )
 
     # --- Constellation membership ---
@@ -668,4 +713,9 @@ class AstronomyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=strategy,
+                    gen_params={
+                        "star": star_name,
+                        "true_constellation": true_const,
+                        "false_constellation": wrong,
+                    },
                 )

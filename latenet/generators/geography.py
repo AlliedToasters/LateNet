@@ -300,6 +300,12 @@ class GeographyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=strategy,
+                    gen_params={
+                        "city": city,
+                        "true_country": true_country,
+                        "false_country": swap_country,
+                        "continent": continent,
+                    },
                 )
 
     def _pick_containment_swaps(
@@ -399,6 +405,12 @@ class GeographyGenerator(BaseGenerator):
                             generator=self.name,
                             template_id=template.id,
                             negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                            gen_params={
+                                "country_a": a,
+                                "country_b": b,
+                                "direction": direction,
+                                "margin": round(abs(lat_diff), 2),
+                            },
                         )
 
                 # East/West — skip antimeridian-ambiguous pairs
@@ -442,6 +454,12 @@ class GeographyGenerator(BaseGenerator):
                             generator=self.name,
                             template_id=template.id,
                             negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                            gen_params={
+                                "country_a": a,
+                                "country_b": b,
+                                "direction": direction,
+                                "margin": round(abs(lon_diff), 2),
+                            },
                         )
 
     def _cardinal_difficulty(self, margin: float) -> str:
@@ -536,6 +554,14 @@ class GeographyGenerator(BaseGenerator):
                 generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                gen_params={
+                    "anchor": anchor,
+                    "near": near,
+                    "far": far,
+                    "distance_near_km": round(d_near, 1),
+                    "distance_far_km": round(d_far, 1),
+                    "ratio": round(ratio, 2),
+                },
             )
 
     # --- Population magnitude ---
@@ -597,6 +623,13 @@ class GeographyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                    gen_params={
+                        "big": big,
+                        "small": small,
+                        "big_population": int(pop_big),
+                        "small_population": int(pop_small),
+                        "ratio": round(ratio, 2),
+                    },
                 )
 
     # --- Area magnitude ---
@@ -658,4 +691,11 @@ class GeographyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                    gen_params={
+                        "big": big,
+                        "small": small,
+                        "big_area_km2": round(area_big, 1),
+                        "small_area_km2": round(area_small, 1),
+                        "ratio": round(ratio, 2),
+                    },
                 )

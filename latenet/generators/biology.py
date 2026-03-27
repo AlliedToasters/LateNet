@@ -334,6 +334,12 @@ class BiologyGenerator(BaseGenerator):
                         generator=self.name,
                         template_id=template.id,
                         negation_strategy=strategy,
+                        gen_params={
+                            "organism": org_name,
+                            "rank": rank_label,
+                            "true_taxon": true_taxon,
+                            "false_taxon": swap_taxon,
+                        },
                     )
 
     def _pick_membership_swap(
@@ -488,6 +494,14 @@ class BiologyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.SIBLING_SWAP.value,
+                    gen_params={
+                        "organism_a": name_a,
+                        "organism_b": name_b,
+                        "false_organism": name_c,
+                        "rank": rank_label,
+                        "taxon": taxon_name,
+                        "lowest_common_rank": lcr,
+                    },
                 )
 
     # --- Rank ordering ---
@@ -535,6 +549,11 @@ class BiologyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                    gen_params={
+                        "specific_rank": specific,
+                        "general_rank": general,
+                        "rank_distance": dist,
+                    },
                 )
 
                 # Also generate with "more general" template
@@ -561,4 +580,9 @@ class BiologyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template2.id,
                     negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                    gen_params={
+                        "specific_rank": specific,
+                        "general_rank": general,
+                        "rank_distance": dist,
+                    },
                 )

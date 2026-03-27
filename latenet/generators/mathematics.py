@@ -438,6 +438,11 @@ class MathematicsGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=strategy,
+                    gen_params={
+                        "number": n,
+                        "true_property": true_prop,
+                        "false_property": false_prop,
+                    },
                 )
 
     def _pick_hard_false_property(
@@ -509,6 +514,11 @@ class MathematicsGenerator(BaseGenerator):
                 semantic_distance=None, generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                gen_params={
+                    "big": big,
+                    "small": small_n,
+                    "ratio": round(big / small_n, 2) if small_n > 0 else None,
+                },
             )
 
         # Hard tier: close numbers (ratio 1.1–2x), same magnitude
@@ -619,6 +629,11 @@ class MathematicsGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=strategy,
+                    gen_params={
+                        "dividend": a,
+                        "true_divisor": true_d,
+                        "false_divisor": false_d,
+                    },
                 )
 
     # --- 4. Arithmetic ---
@@ -690,6 +705,13 @@ class MathematicsGenerator(BaseGenerator):
                         generator=self.name,
                         template_id=template.id,
                         negation_strategy=NegationStrategy.SIBLING_SWAP.value,
+                        gen_params={
+                            "operation": operation,
+                            "operand_a": a,
+                            "operand_b": b,
+                            "true_result": result,
+                            "false_result": false_result,
+                        },
                     )
 
                 pair_count += 1
@@ -740,6 +762,12 @@ class MathematicsGenerator(BaseGenerator):
                 semantic_distance=None, generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                gen_params={
+                    "more_factors_number": a,
+                    "fewer_factors_number": b,
+                    "factors_a": num_factors(a),
+                    "factors_b": num_factors(b),
+                },
             )
 
         # --- Medium tier: moderate factor ratio (2x-4x) ---
@@ -768,6 +796,12 @@ class MathematicsGenerator(BaseGenerator):
                 semantic_distance=None, generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                gen_params={
+                    "more_factors_number": a,
+                    "fewer_factors_number": b,
+                    "factors_a": num_factors(a),
+                    "factors_b": num_factors(b),
+                },
             )
 
         # --- Easy tier: large factor ratio (highly composite vs primes) ---
@@ -799,6 +833,12 @@ class MathematicsGenerator(BaseGenerator):
                 semantic_distance=None, generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
+                gen_params={
+                    "more_factors_number": a,
+                    "fewer_factors_number": b,
+                    "factors_a": num_factors(a),
+                    "factors_b": num_factors(b),
+                },
             )
 
     # --- 6. Shared factor / coprime ---
@@ -881,4 +921,10 @@ class MathematicsGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=NegationStrategy.DIRECT_NEGATION.value,
+                    gen_params={
+                        "number_a": a,
+                        "number_b": b,
+                        "shares_factor": share_factor,
+                        "gcd": _g,
+                    },
                 )

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from enum import Enum
 
 from nltk.corpus.reader.wordnet import Synset
@@ -60,6 +61,7 @@ class ContrastivePair:
     target_synset: str | None = None
     neg_synset: str | None = None
     tier: int = 1
+    gen_params: dict | None = None
 
     def __post_init__(self) -> None:
         self.true_statement = sanitize_statement(self.true_statement)
@@ -80,6 +82,7 @@ class ContrastivePair:
             "generator": self.generator,
             "template_id": self.template_id,
             "negation_strategy": self.negation_strategy,
+            "gen_params": json.dumps(self.gen_params) if self.gen_params is not None else None,
         }
         true_row = {
             "id": f"{self.pair_id}_true",

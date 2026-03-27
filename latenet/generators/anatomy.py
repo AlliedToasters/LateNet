@@ -300,6 +300,11 @@ class AnatomyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=strategy,
+                    gen_params={
+                        "structure": struct.name,
+                        "true_system": true_label,
+                        "false_swap": wrong_label,
+                    },
                 )
 
     # --- Regional containment ---
@@ -363,6 +368,11 @@ class AnatomyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=strategy,
+                    gen_params={
+                        "structure": struct.name,
+                        "true_region": true_label,
+                        "false_swap": wrong_label,
+                    },
                 )
 
     # --- Structure type classification ---
@@ -419,6 +429,11 @@ class AnatomyGenerator(BaseGenerator):
                     generator=self.name,
                     template_id=template.id,
                     negation_strategy=strategy,
+                    gen_params={
+                        "structure": struct.name,
+                        "true_type": true_label,
+                        "false_swap": wrong_label,
+                    },
                 )
 
     # --- Regional co-location ---
@@ -501,6 +516,12 @@ class AnatomyGenerator(BaseGenerator):
                         generator=self.name,
                         template_id=template.id,
                         negation_strategy=strategy,
+                        gen_params={
+                            "structure_a": a.name,
+                            "structure_b": b.name,
+                            "true_region": region_label,
+                            "false_swap": c.name,
+                        },
                     )
 
     # --- System co-membership ---
@@ -584,4 +605,10 @@ class AnatomyGenerator(BaseGenerator):
                         generator=self.name,
                         template_id=template.id,
                         negation_strategy=strategy,
+                        gen_params={
+                            "structure_a": a.name,
+                            "structure_b": b.name,
+                            "true_system": system_label,
+                            "false_swap": c.name,
+                        },
                     )

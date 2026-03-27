@@ -411,6 +411,12 @@ class LanguageGenerator(BaseGenerator):
                         negation_strategy=strategy,
                         source_synset=english,
                         target_synset=lang,
+                        gen_params={
+                            "source_word": english,
+                            "target_lang": lang,
+                            "true_translation": true_translation,
+                            "false_translation": swap_translation,
+                        },
                     )
 
     def _pick_translates_to_swaps(
@@ -496,6 +502,12 @@ class LanguageGenerator(BaseGenerator):
                     negation_strategy=NegationStrategy.REVERSE_RELATION.value,
                     source_synset=english,
                     target_synset=lang,
+                    gen_params={
+                        "source_word": english,
+                        "target_lang": lang,
+                        "true_translation": true_translation,
+                        "false_english": swap_english,
+                    },
                 )
 
     # --- word_is_language ---
@@ -553,6 +565,12 @@ class LanguageGenerator(BaseGenerator):
                         source_synset=english,
                         target_synset=true_lang,
                         neg_synset=false_lang,
+                        gen_params={
+                            "source_word": english,
+                            "word": true_translation,
+                            "true_lang": true_lang,
+                            "false_lang": false_lang,
+                        },
                     )
 
     def _pick_language_id_swaps(

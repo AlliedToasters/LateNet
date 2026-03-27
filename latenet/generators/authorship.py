@@ -347,6 +347,12 @@ class AuthorshipGenerator(BaseGenerator):
                     source_synset=row["work_qid"],
                     target_synset=row["author_qid"],
                     neg_synset=swap["author_qid"],
+                    gen_params={
+                        "work": work_name,
+                        "author": author_name,
+                        "false_author": swap_author,
+                        "creative_domain": domain,
+                    },
                 )
 
     def _render_created_by(
@@ -429,6 +435,12 @@ class AuthorshipGenerator(BaseGenerator):
                 source_synset=author_qid,
                 target_synset=true_row["work_qid"],
                 neg_synset=false_row["work_qid"],
+                gen_params={
+                    "author": author_name,
+                    "true_work": true_work,
+                    "false_work": false_work,
+                    "role": role,
+                },
             )
 
     # --- worked_in_domain ---
@@ -490,4 +502,9 @@ class AuthorshipGenerator(BaseGenerator):
                 template_id=template.id,
                 negation_strategy=NegationStrategy.DISTANT_SWAP.value,
                 source_synset=row["author_qid"],
+                gen_params={
+                    "author": author_name,
+                    "true_role": true_role,
+                    "false_role": false_role,
+                },
             )
