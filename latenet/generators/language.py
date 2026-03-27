@@ -21,6 +21,7 @@ from latenet.generators.muse_data import (
     load_dictionary,
     tag_domains,
 )
+from latenet.sanitize import render_template
 from latenet.types import ContrastivePair, Difficulty, NegationStrategy
 
 logger = logging.getLogger(__name__)
@@ -334,10 +335,10 @@ class LanguageGenerator(BaseGenerator):
                     template = self._pick_template("translates_to")
                     lang_name = self._lang_display(lang)
 
-                    true_stmt = template.pattern.format(
+                    true_stmt = render_template(template.pattern,
                         language=lang_name, english=english, translation=true_translation,
                     )
-                    false_stmt = template.pattern.format(
+                    false_stmt = render_template(template.pattern,
                         language=lang_name, english=english, translation=swap_translation,
                     )
 
@@ -426,10 +427,10 @@ class LanguageGenerator(BaseGenerator):
                 template = self._pick_template("translation_of")
                 lang_name = self._lang_display(lang)
 
-                true_stmt = template.pattern.format(
+                true_stmt = render_template(template.pattern,
                     translation=true_translation, language=lang_name, english=english,
                 )
-                false_stmt = template.pattern.format(
+                false_stmt = render_template(template.pattern,
                     translation=true_translation, language=lang_name, english=swap_english,
                 )
 
@@ -480,10 +481,10 @@ class LanguageGenerator(BaseGenerator):
                     true_lang_name = self._lang_display(true_lang)
                     false_lang_name = self._lang_display(false_lang)
 
-                    true_stmt = template.pattern.format(
+                    true_stmt = render_template(template.pattern,
                         word=true_translation, language=true_lang_name,
                     )
-                    false_stmt = template.pattern.format(
+                    false_stmt = render_template(template.pattern,
                         word=true_translation, language=false_lang_name,
                     )
 

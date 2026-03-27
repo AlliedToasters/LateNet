@@ -190,8 +190,8 @@ for _c in CONSTELLATIONS:
 # Planet type groups
 PLANET_TYPES = ["terrestrial", "gas_giant", "ice_giant", "dwarf_planet"]
 TYPE_LABELS: dict[str, str] = {
-    "terrestrial": "a terrestrial planet",
-    "gas_giant": "a gas giant",
-    "ice_giant": "an ice giant",
-    "dwarf_planet": "a dwarf planet",
+    "terrestrial": "terrestrial planet",
+    "gas_giant": "gas giant",
+    "ice_giant": "ice giant",
+    "dwarf_planet": "dwarf planet",
 }

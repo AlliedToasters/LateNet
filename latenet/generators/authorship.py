@@ -16,6 +16,7 @@ import pandas as pd
 
 from latenet.datasources.wikidata import load_authors_and_works
 from latenet.generators.base import BaseGenerator
+from latenet.sanitize import render_template
 from latenet.types import ContrastivePair, Difficulty, NegationStrategy
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ _CREATED_BY_TEMPLATES = [
     AuthTemplate("auth_work_03", "created_by",
                  "The {work_type} {work} was {verb} by {author}."),
     AuthTemplate("auth_work_04", "created_by",
-                 "{work} is a {work_type} by {author}."),
+                 "{work} is {a_work_type} by {author}."),
 ]
 
 # Reverse attribution: "{author} is the {role} of {work}"
@@ -57,11 +58,11 @@ _AUTHOR_OF_TEMPLATES = [
 # Domain attribution: "{author} was a {role}"
 _DOMAIN_TEMPLATES = [
     AuthTemplate("auth_domain_01", "worked_in_domain",
-                 "{author} was a {role}."),
+                 "{author} was {a_role}."),
     AuthTemplate("auth_domain_02", "worked_in_domain",
-                 "{author} is known as a {role}."),
+                 "{author} is known as {a_role}."),
     AuthTemplate("auth_domain_03", "worked_in_domain",
-                 "{author} worked as a {role}."),
+                 "{author} worked as {a_role}."),
 ]
 
 _ALL_TEMPLATES: dict[str, list[AuthTemplate]] = {
@@ -354,7 +355,7 @@ class AuthorshipGenerator(BaseGenerator):
         work: str, author: str, work_type: str, verb: str, past_verb: str,
     ) -> str:
         """Render a created_by template with domain-appropriate verb."""
-        return template.pattern.format(
+        return render_template(template.pattern,
             work=work, author=author, work_type=work_type,
             verb=verb, past_verb=past_verb,
         )
@@ -402,10 +403,10 @@ class AuthorshipGenerator(BaseGenerator):
             difficulty = self._difficulty_for_swap(domain, era, domain, false_era)
 
             template = self._pick_template("author_of")
-            true_stmt = template.pattern.format(
+            true_stmt = render_template(template.pattern,
                 author=author_name, work=true_work, role=role,
             )
-            false_stmt = template.pattern.format(
+            false_stmt = render_template(template.pattern,
                 author=author_name, work=false_work, role=role,
             )
 
@@ -469,8 +470,8 @@ class AuthorshipGenerator(BaseGenerator):
             false_role = self.rng.choice(false_roles)
 
             template = self._pick_template("worked_in_domain")
-            true_stmt = template.pattern.format(author=author_name, role=true_role)
-            false_stmt = template.pattern.format(author=author_name, role=false_role)
+            true_stmt = render_template(template.pattern,author=author_name, role=true_role)
+            false_stmt = render_template(template.pattern,author=author_name, role=false_role)
 
             pair_id = _make_pair_id([
                 "auth", "domain", row["author_qid"],

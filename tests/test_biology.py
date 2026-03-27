@@ -239,7 +239,7 @@ class TestRank:
         pairs = list(gen._generate_rank())
         species_genus = [
             p for p in pairs
-            if "species" in p.true_statement and "genus" in p.true_statement
+            if "pecies" in p.true_statement and "genus" in p.true_statement
             and "more specific" in p.true_statement
         ]
         assert len(species_genus) > 0

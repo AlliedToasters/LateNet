@@ -25,6 +25,7 @@ from latenet.generators.anat_data import (
     SYSTEM_LABELS,
     AnatomicalStructure,
 )
+from latenet.sanitize import render_template
 from latenet.types import ContrastivePair, Difficulty, NegationStrategy
 
 logger = logging.getLogger(__name__)
@@ -43,33 +44,33 @@ class AnatTemplate:
 
 _SYSTEM_TEMPLATES = [
     AnatTemplate("anat_system_01", "in_system",
-                 "The {structure} is part of the {system} system."),
+                 "The {structure} {verb_is} part of the {system} system."),
     AnatTemplate("anat_system_02", "in_system",
-                 "The {structure} belongs to the {system} system."),
+                 "The {structure} {verb_belongs} to the {system} system."),
     AnatTemplate("anat_system_03", "in_system",
-                 "The {structure} is a component of the {system} system."),
+                 "The {structure} {verb_is} a component of the {system} system."),
     AnatTemplate("anat_system_04", "in_system",
-                 "The {structure} is classified under the {system} system."),
+                 "The {structure} {verb_is} classified under the {system} system."),
 ]
 
 _REGION_TEMPLATES = [
     AnatTemplate("anat_region_01", "in_region",
-                 "The {structure} is located in the {region}."),
+                 "The {structure} {verb_is} located in the {region}."),
     AnatTemplate("anat_region_02", "in_region",
-                 "The {structure} is found in the {region}."),
+                 "The {structure} {verb_is} found in the {region}."),
     AnatTemplate("anat_region_03", "in_region",
-                 "The {structure} is in the {region}."),
+                 "The {structure} {verb_is} in the {region}."),
     AnatTemplate("anat_region_04", "in_region",
-                 "The {structure} is a structure of the {region}."),
+                 "The {structure} {verb_is} a structure of the {region}."),
 ]
 
 _TYPE_TEMPLATES = [
     AnatTemplate("anat_type_01", "is_structure_type",
-                 "The {structure} is a {type}."),
+                 "The {structure} {verb_is} {a_type}."),
     AnatTemplate("anat_type_02", "is_structure_type",
-                 "The {structure} is classified as a {type}."),
+                 "The {structure} {verb_is} classified as {a_type}."),
     AnatTemplate("anat_type_03", "is_structure_type",
-                 "The {structure} is a type of {type}."),
+                 "The {structure} {verb_is} a type of {type}."),
 ]
 
 _COLOC_TEMPLATES = [
@@ -95,6 +96,27 @@ _ALL_TEMPLATES: dict[str, list[AnatTemplate]] = {
     "same_region": _COLOC_TEMPLATES,
     "same_system": _COMEM_TEMPLATES,
 }
+
+
+_PLURAL_SUFFIXES = ("s", "ae", "es")
+_KNOWN_PLURAL_NAMES = frozenset({
+    "phalanges of the hand", "phalanges of the foot",
+    "cervical vertebrae", "thoracic vertebrae", "lumbar vertebrae",
+    "intercostal muscles", "forearm flexors", "forearm extensors",
+    "adductors", "hamstrings", "carpals", "metacarpals", "tarsals",
+    "metatarsals", "ribs", "tonsils", "kidneys", "lungs", "eyes", "ears",
+    "adrenal glands", "coronary arteries",
+})
+
+
+def _is_plural_structure(name: str) -> bool:
+    """Check if an anatomical structure name is grammatically plural."""
+    return name.lower() in _KNOWN_PLURAL_NAMES
+
+
+def _conjugate(name: str, singular: str, plural: str) -> str:
+    """Pick verb form based on structure plurality."""
+    return plural if _is_plural_structure(name) else singular
 
 
 def _make_pair_id(parts: list[str]) -> str:
@@ -259,8 +281,10 @@ class AnatomyGenerator(BaseGenerator):
                 wrong_label = SYSTEM_LABELS[wrong_system]
 
                 template = self._pick_template("in_system")
-                true_stmt = template.pattern.format(structure=struct.name, system=true_label)
-                false_stmt = template.pattern.format(structure=struct.name, system=wrong_label)
+                _is = _conjugate(struct.name, "is", "are")
+                _belongs = _conjugate(struct.name, "belongs", "belong")
+                true_stmt = render_template(template.pattern, structure=struct.name, system=true_label, verb_is=_is, verb_belongs=_belongs)
+                false_stmt = render_template(template.pattern, structure=struct.name, system=wrong_label, verb_is=_is, verb_belongs=_belongs)
 
                 pair_id = _make_pair_id([
                     "anat", "system", struct.name, wrong_system, template.id, difficulty,
@@ -321,8 +345,9 @@ class AnatomyGenerator(BaseGenerator):
                 wrong_label = REGION_LABELS[wrong_region]
 
                 template = self._pick_template("in_region")
-                true_stmt = template.pattern.format(structure=struct.name, region=true_label)
-                false_stmt = template.pattern.format(structure=struct.name, region=wrong_label)
+                _is = _conjugate(struct.name, "is", "are")
+                true_stmt = render_template(template.pattern, structure=struct.name, region=true_label, verb_is=_is)
+                false_stmt = render_template(template.pattern, structure=struct.name, region=wrong_label, verb_is=_is)
 
                 pair_id = _make_pair_id([
                     "anat", "region", struct.name, wrong_region, template.id, difficulty,
@@ -376,8 +401,9 @@ class AnatomyGenerator(BaseGenerator):
                 wrong_label = STRUCTURE_TYPE_LABELS[wrong_type]
 
                 template = self._pick_template("is_structure_type")
-                true_stmt = template.pattern.format(structure=struct.name, type=true_label)
-                false_stmt = template.pattern.format(structure=struct.name, type=wrong_label)
+                _is = _conjugate(struct.name, "is", "are")
+                true_stmt = render_template(template.pattern, structure=struct.name, type=true_label, verb_is=_is)
+                false_stmt = render_template(template.pattern, structure=struct.name, type=wrong_label, verb_is=_is)
 
                 pair_id = _make_pair_id([
                     "anat", "type", struct.name, wrong_type, template.id, difficulty,
@@ -422,7 +448,7 @@ class AnatomyGenerator(BaseGenerator):
                 region_label = REGION_LABELS[region]
 
                 template = self._pick_template("same_region")
-                true_stmt = template.pattern.format(
+                true_stmt = render_template(template.pattern,
                     structureA=a.name, structureB=b.name, region=region_label,
                 )
 
@@ -457,7 +483,7 @@ class AnatomyGenerator(BaseGenerator):
                     if not candidates:
                         continue
                     c = self.rng.choice(candidates)
-                    false_stmt = template.pattern.format(
+                    false_stmt = render_template(template.pattern,
                         structureA=a.name, structureB=c.name, region=region_label,
                     )
 
@@ -503,7 +529,7 @@ class AnatomyGenerator(BaseGenerator):
                 system_label = SYSTEM_LABELS[system]
 
                 template = self._pick_template("same_system")
-                true_stmt = template.pattern.format(
+                true_stmt = render_template(template.pattern,
                     structureA=a.name, structureB=b.name, system=system_label,
                 )
 
@@ -540,7 +566,7 @@ class AnatomyGenerator(BaseGenerator):
                     if not candidates:
                         continue
                     c = self.rng.choice(candidates)
-                    false_stmt = template.pattern.format(
+                    false_stmt = render_template(template.pattern,
                         structureA=a.name, structureB=c.name, system=system_label,
                     )
 

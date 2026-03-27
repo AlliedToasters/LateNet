@@ -23,6 +23,7 @@ from latenet.generators.astro_data import (
     TYPE_LABELS,
     Moon,
 )
+from latenet.sanitize import render_template
 from latenet.types import ContrastivePair, Difficulty, NegationStrategy
 
 logger = logging.getLogger(__name__)
@@ -75,9 +76,9 @@ _MAGNITUDE_TEMPLATES = [
 ]
 
 _TYPE_TEMPLATES = [
-    AstroTemplate("astro_type_01", "is_type", "{planet} is {type}."),
-    AstroTemplate("astro_type_02", "is_type", "{planet} is classified as {type}."),
-    AstroTemplate("astro_type_03", "is_type", "{planet} is categorized as {type}."),
+    AstroTemplate("astro_type_01", "is_type", "{planet} is {a_type}."),
+    AstroTemplate("astro_type_02", "is_type", "{planet} is classified as {a_type}."),
+    AstroTemplate("astro_type_03", "is_type", "{planet} is categorized as {a_type}."),
 ]
 
 _STAR_PROP_TEMPLATES = [
@@ -199,12 +200,12 @@ class AstronomyGenerator(BaseGenerator):
         for moon in moons:
             true_parent = moon.parent_planet
             template = self._pick_template("orbits")
-            true_stmt = template.pattern.format(moon=moon.name, planet=true_parent)
+            true_stmt = render_template(template.pattern,moon=moon.name, planet=true_parent)
 
             # Build swap candidates at different difficulties
             swaps = self._orbit_swaps(moon, all_parent_names)
             for wrong_parent, difficulty, strategy in swaps:
-                false_stmt = template.pattern.format(moon=moon.name, planet=wrong_parent)
+                false_stmt = render_template(template.pattern,moon=moon.name, planet=wrong_parent)
                 pair_id = _make_pair_id([
                     "astro", "orbit", moon.name, wrong_parent, template.id, difficulty,
                 ])
@@ -226,13 +227,13 @@ class AstronomyGenerator(BaseGenerator):
         self.rng.shuffle(planets)
         for planet in planets:
             template = self._pick_template("orbits_planet")
-            true_stmt = template.pattern.format(planet=planet.name)
+            true_stmt = render_template(template.pattern,planet=planet.name)
             # False: planet orbits another planet
             other_planets = [p for p in PLANETS if p.name != planet.name]
             if not other_planets:
                 continue
             wrong = self.rng.choice(other_planets)
-            false_stmt = template.pattern.format(planet=planet.name).replace("the Sun", wrong.name)
+            false_stmt = render_template(template.pattern,planet=planet.name).replace("the Sun", wrong.name)
             pair_id = _make_pair_id([
                 "astro", "orbit_sun", planet.name, wrong.name, template.id,
             ])
@@ -312,8 +313,8 @@ class AstronomyGenerator(BaseGenerator):
                 gap = abs(a.order_from_sun - b.order_from_sun)
 
                 template = self._pick_template("closer_to_sun")
-                true_stmt = template.pattern.format(planetA=closer.name, planetB=farther.name)
-                false_stmt = template.pattern.format(planetA=farther.name, planetB=closer.name)
+                true_stmt = render_template(template.pattern,planetA=closer.name, planetB=farther.name)
+                false_stmt = render_template(template.pattern,planetA=farther.name, planetB=closer.name)
 
                 if gap == 1:
                     difficulty = Difficulty.HARD.value
@@ -342,14 +343,14 @@ class AstronomyGenerator(BaseGenerator):
         template = self._pick_template("closer_to_sun_ordinal")
         for planet in planets:
             true_ordinal = _ORDINALS[planet.order_from_sun]
-            true_stmt = template.pattern.format(planet=planet.name, ordinal=true_ordinal)
+            true_stmt = render_template(template.pattern,planet=planet.name, ordinal=true_ordinal)
 
             # Pick a wrong ordinal
             wrong_orders = [o for o in _ORDINALS if o != planet.order_from_sun]
             if not wrong_orders:
                 continue
             wrong_order = self.rng.choice(wrong_orders)
-            false_stmt = template.pattern.format(planet=planet.name, ordinal=_ORDINALS[wrong_order])
+            false_stmt = render_template(template.pattern,planet=planet.name, ordinal=_ORDINALS[wrong_order])
 
             gap = abs(wrong_order - planet.order_from_sun)
             if gap == 1:
@@ -417,10 +418,10 @@ class AstronomyGenerator(BaseGenerator):
                     else:
                         template = _ALL_TEMPLATES["property_greater"][2]  # "greater {property}"
 
-                    true_stmt = template.pattern.format(
+                    true_stmt = render_template(template.pattern,
                         bodyA=big.name, bodyB=small.name, property=prop_label,
                     )
-                    false_stmt = template.pattern.format(
+                    false_stmt = render_template(template.pattern,
                         bodyA=small.name, bodyB=big.name, property=prop_label,
                     )
 
@@ -460,7 +461,7 @@ class AstronomyGenerator(BaseGenerator):
             true_type = body.planet_type
             true_label = TYPE_LABELS[true_type]
             template = self._pick_template("is_type")
-            true_stmt = template.pattern.format(planet=body.name, type=true_label)
+            true_stmt = render_template(template.pattern,planet=body.name, type=true_label)
 
             wrong_types = [t for t in PLANET_TYPES if t != true_type]
 
@@ -499,7 +500,7 @@ class AstronomyGenerator(BaseGenerator):
                     continue
                 wrong = self.rng.choice(candidates)
                 wrong_label = TYPE_LABELS[wrong]
-                false_stmt = template.pattern.format(planet=body.name, type=wrong_label)
+                false_stmt = render_template(template.pattern,planet=body.name, type=wrong_label)
                 pair_id = _make_pair_id([
                     "astro", "type", body.name, wrong, template.id, difficulty,
                 ])
@@ -536,8 +537,8 @@ class AstronomyGenerator(BaseGenerator):
                     continue  # Too close to compare meaningfully
 
                 template = _ALL_TEMPLATES["star_property"][0]  # brightness
-                true_stmt = template.pattern.format(starA=brighter.name, starB=dimmer.name)
-                false_stmt = template.pattern.format(starA=dimmer.name, starB=brighter.name)
+                true_stmt = render_template(template.pattern,starA=brighter.name, starB=dimmer.name)
+                false_stmt = render_template(template.pattern,starA=dimmer.name, starB=brighter.name)
 
                 if mag_diff < 1.5:
                     difficulty = Difficulty.HARD.value
@@ -575,8 +576,8 @@ class AstronomyGenerator(BaseGenerator):
                     continue
 
                 template = _ALL_TEMPLATES["star_property"][1]  # distance
-                true_stmt = template.pattern.format(starA=closer.name, starB=farther.name)
-                false_stmt = template.pattern.format(starA=farther.name, starB=closer.name)
+                true_stmt = render_template(template.pattern,starA=closer.name, starB=farther.name)
+                false_stmt = render_template(template.pattern,starA=farther.name, starB=closer.name)
 
                 if ratio < 5:
                     difficulty = Difficulty.HARD.value
@@ -615,7 +616,7 @@ class AstronomyGenerator(BaseGenerator):
 
         for star_name, true_const in star_constellation_pairs:
             template = self._pick_template("in_constellation")
-            true_stmt = template.pattern.format(star=star_name, constellation=true_const)
+            true_stmt = render_template(template.pattern,star=star_name, constellation=true_const)
 
             wrong_consts = [c for c in all_constellations if c != true_const]
             if not wrong_consts:
@@ -652,7 +653,7 @@ class AstronomyGenerator(BaseGenerator):
                 if not candidates:
                     continue
                 wrong = self.rng.choice(candidates)
-                false_stmt = template.pattern.format(star=star_name, constellation=wrong)
+                false_stmt = render_template(template.pattern,star=star_name, constellation=wrong)
                 pair_id = _make_pair_id([
                     "astro", "constellation", star_name, wrong, template.id, difficulty,
                 ])

@@ -4,6 +4,10 @@
 
 LateNet generates large-scale contrastive true/false statement pairs for probing truth representations in LLM activations. It combines WordNet-derived taxonomic knowledge with domain-specific generators grounded in structured data sources (geospatial, temporal, chemical, linguistic, etc.). This repo handles text dataset generation and validation only — activation extraction happens in the sibling `lmprobe` repo.
 
+## Environment
+
+Use the `.venv` virtualenv in the project root. Activate with `source .venv/bin/activate` or invoke directly via `.venv/bin/python`, `.venv/bin/pytest`, etc.
+
 ## Build & Run
 
 ```bash
