@@ -64,13 +64,19 @@ def main():
         logger.error("Ledger is empty. Run latenet-batch first.")
         return
 
-    # Filter to clean (uncontested) rows only
+    # Filter to clean rows: must be validated AND not contested
     if "contested" in ledger.columns:
-        clean = ledger[ledger["contested"] != True].copy()  # noqa: E712
+        clean = ledger[ledger["contested"] == False].copy()  # noqa: E712
     else:
-        clean = ledger.copy()
+        # No validation data at all — nothing is clean
+        logger.error("Ledger has no 'contested' column — run validation first.")
+        return
 
-    logger.info("Ledger: %d total rows, %d clean rows", len(ledger), len(clean))
+    unvalidated = len(ledger) - ledger["contested"].notna().sum() if "contested" in ledger.columns else len(ledger)
+    logger.info(
+        "Ledger: %d total rows, %d validated, %d clean, %d unvalidated",
+        len(ledger), len(ledger) - unvalidated, len(clean), unvalidated,
+    )
 
     # Filter to requested generators
     if args.generators:

@@ -44,6 +44,7 @@ latenet-qa = "scripts.qa_sample:main"
 latenet-build = "scripts.build_dataset:main"
 latenet-batch = "scripts.batch:main"
 latenet-curate = "scripts.curate:main"
+latenet-audit = "scripts.audit:main"
 
 [project.urls]
 Repository = "https://github.com/AlliedToasters/LateNet"
