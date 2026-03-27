@@ -318,11 +318,22 @@ class MathematicsGenerator(BaseGenerator):
     # --- 1. Property membership ---
 
     def _generate_property(self) -> Iterator[ContrastivePair]:
-        """Generate has_property pairs: 'N is prime', 'N is even', etc."""
+        """Generate has_property pairs: 'N is prime', 'N is even', etc.
+
+        Uses a two-phase approach:
+        1. Property-first phase: iterate over each property and pick exemplar
+           numbers that satisfy it, forcing that property as the true side.
+           This guarantees rare properties (perfect_cube, perfect_number, etc.)
+           appear on the true side.
+        2. Uniform-random phase: the original approach — pick a random number,
+           then pick a random true property. Preserves natural distribution
+           for common properties.
+
+        The two phases are interleaved for output diversity.
+        """
         lo, hi = self.property_range
 
-        # Build pool of (number, true_properties) tuples
-        # Use curated numbers plus a random sample
+        # Build pool of curated + random numbers
         curated = set(self._primes[:46])  # primes below ~200
         curated.update(self._squares)
         curated.update(self._cubes)
@@ -339,10 +350,40 @@ class MathematicsGenerator(BaseGenerator):
             curated.add(self.rng.randint(lo, hi))
 
         numbers = sorted(curated)
-        self.rng.shuffle(numbers)
 
-        for n in numbers:
-            # Find all true properties
+        # --- Phase 1: Property-first exemplar seeding ---
+        # For each property, collect exemplars and force that property as true.
+        min_per_property = 6
+        property_first_pairs: list[tuple[int, str]] = []  # (number, forced_true_prop)
+        for prop_name, (_, checker) in _PROPERTIES.items():
+            exemplars = [n for n in numbers if checker(n)]
+            self.rng.shuffle(exemplars)
+            for n in exemplars[:min_per_property]:
+                property_first_pairs.append((n, prop_name))
+
+        self.rng.shuffle(property_first_pairs)
+
+        # --- Phase 2: Uniform-random (original approach) ---
+        uniform_numbers = list(numbers)
+        self.rng.shuffle(uniform_numbers)
+        uniform_pairs: list[tuple[int, str | None]] = [
+            (n, None) for n in uniform_numbers
+        ]
+
+        # --- Interleave: alternate property-first and uniform-random ---
+        merged: list[tuple[int, str | None]] = []
+        pi, ui = 0, 0
+        while pi < len(property_first_pairs) or ui < len(uniform_pairs):
+            # Emit one property-first pair, then one uniform pair
+            if pi < len(property_first_pairs):
+                merged.append(property_first_pairs[pi])
+                pi += 1
+            if ui < len(uniform_pairs):
+                merged.append(uniform_pairs[ui])
+                ui += 1
+
+        for n, forced_prop in merged:
+            # Find all true/false properties for this number
             true_props = [
                 prop_name for prop_name, (_, checker) in _PROPERTIES.items()
                 if checker(n)
@@ -354,7 +395,12 @@ class MathematicsGenerator(BaseGenerator):
             if not true_props or not false_props:
                 continue
 
-            true_prop = self.rng.choice(true_props)
+            # Use forced property if set and valid, otherwise random choice
+            if forced_prop is not None and forced_prop in true_props:
+                true_prop = forced_prop
+            else:
+                true_prop = self.rng.choice(true_props)
+
             true_label = _PROPERTIES[true_prop][0]
 
             # Hard tier: pick a false property that's "close" or tricky
