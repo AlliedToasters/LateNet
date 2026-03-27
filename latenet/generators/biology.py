@@ -286,10 +286,12 @@ class BiologyGenerator(BaseGenerator):
         self.rng.shuffle(indices)
 
         # Ranks to generate membership statements for (skip species — it's the organism itself).
-        # Exclude class_ — the 2021 ICNP bacterial reclassification (Firmicutes→Bacillota etc.)
-        # means class-level names are ambiguous between taxonomic and morphological senses,
-        # causing high dispute rates (~35%) during validation.
-        membership_ranks = ["family", "order", "phylum", "kingdom"]
+        # Restrict to family and order only. The 2021 ICNP bacterial reclassification
+        # renamed taxa at class, phylum, AND kingdom levels (Firmicutes→Bacillota,
+        # Actinobacteria→Actinomycetota, kingdom Bacillati, etc.). LLMs trained on
+        # mixed-era data reject the new names, causing ~35% dispute rates.
+        # Family and order names are stable and well-known.
+        membership_ranks = ["family", "order"]
 
         for idx in indices:
             row = organisms.loc[idx]
