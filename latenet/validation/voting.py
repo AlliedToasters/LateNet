@@ -374,12 +374,21 @@ def run_parallel_validation(
     df: pd.DataFrame,
     legs: set[str] | None = None,
     checkpoint_dir: Path | None = None,
+    concurrency: int = 1,
 ) -> tuple[dict[int, RowVerdict] | None, dict[int, dict[str, RowVerdict]] | None]:
     """Run NDIF and Anthropic legs in parallel, per row.
 
     Every completed row has verdicts from both legs, enabling graceful
     early stopping — if the process is killed, all finished rows are
     atomically complete and usable for consensus.
+
+    When concurrency > 1, rows are processed in batches:
+    - NDIF: multiple prompts sent in a single ``extract_logits_only()``
+      call (server-side batching, ~9x throughput at batch=8).
+    - Anthropic: multiple Sonnet calls fired concurrently via
+      ThreadPoolExecutor.
+    NDIF batching and Anthropic concurrency run in parallel with each
+    other. Opus escalations remain sequential within each batch.
 
     Parameters
     ----------
@@ -389,6 +398,11 @@ def run_parallel_validation(
         Which legs to run. Default: {"ndif", "anthropic"}.
     checkpoint_dir : Path | None
         Directory for checkpoint files.
+    concurrency : int
+        Number of rows to process simultaneously. At concurrency=1 (default),
+        behaviour is identical to the original sequential loop. At higher
+        values, NDIF uses server-side batching and Anthropic uses concurrent
+        API calls.
 
     Returns
     -------
@@ -516,6 +530,84 @@ def run_parallel_validation(
             logger.error("NDIF failed for row %d: %s", idx, e)
             return RowVerdict(error=str(e))
 
+    def _ndif_batch(batch_items: list[tuple[int, pd.Series]]) -> dict[int, RowVerdict]:
+        """Validate a batch of rows via a single NDIF call (server-side batching).
+
+        Rows already in the checkpoint are returned from cache. The remaining
+        rows are packed into one ``extract_logits_only()`` call with multiple
+        prompts, which NDIF processes in a single forward pass on the server.
+        """
+        from lmprobe.retry import retry_with_backoff
+
+        results: dict[int, RowVerdict] = {}
+        to_call: list[tuple[int, pd.Series, str]] = []  # (idx, row, prompt)
+
+        for idx, row in batch_items:
+            if idx in existing_ndif and existing_ndif[idx].get("error") is None:
+                v = existing_ndif[idx]
+                results[idx] = RowVerdict(
+                    says_true=v.get("says_true"),
+                    agrees_with_label=v.get("agrees_with_label"),
+                    confidence=v.get("confidence"),
+                    raw=v.get("raw"),
+                )
+            else:
+                to_call.append((idx, row, _chat_format(row["statement"])))
+
+        if not to_call:
+            return results
+
+        prompts = [prompt for _, _, prompt in to_call]
+        try:
+            logits, _mask, logits_indices = retry_with_backoff(
+                lambda ps=prompts: ndif_ext.extract_logits_only(
+                    ps, remote=True, logit_top_k=10,
+                ),
+                max_retries=5,
+                base_delay=3.0,
+                max_delay=120.0,
+                context=f"NDIF batch ({len(prompts)} prompts)",
+            )
+
+            for b, (idx, row, _) in enumerate(to_call):
+                last_logits = logits[b, -1, :]
+                last_indices = logits_indices[b, -1, :]
+                t_logit = float("-inf")
+                f_logit = float("-inf")
+                for i, vid in enumerate(last_indices.tolist()):
+                    if vid == ndif_true_id:
+                        t_logit = last_logits[i].item()
+                    elif vid == ndif_false_id:
+                        f_logit = last_logits[i].item()
+
+                if t_logit == float("-inf") and f_logit == float("-inf"):
+                    top_ids = last_indices.tolist()
+                    logger.warning(
+                        "NDIF row %d: neither True nor False in top-k. "
+                        "Top token IDs: %s. Statement: %.80s",
+                        idx, top_ids, row["statement"],
+                    )
+                    results[idx] = RowVerdict(
+                        confidence=float("-inf"),
+                        raw=f"true_logit=-inf, false_logit=-inf, top_ids={top_ids}",
+                        error="true_false_not_in_topk",
+                    )
+                else:
+                    verdict = RowVerdict(
+                        says_true=t_logit > f_logit,
+                        confidence=abs(t_logit - f_logit),
+                        raw=f"true_logit={t_logit:.4f}, false_logit={f_logit:.4f}",
+                    )
+                    verdict.agrees_with_label = verdict.says_true == bool(row["label"])
+                    results[idx] = verdict
+
+        except Exception as e:
+            logger.error("NDIF batch failed (%d prompts): %s", len(prompts), e)
+            for idx, row, _ in to_call:
+                results[idx] = RowVerdict(error=str(e))
+
+        return results
+
     def _anthropic_one_row(idx: int, row: pd.Series) -> dict[str, RowVerdict]:
         """Validate a single row via Sonnet (+ Opus escalation if needed)."""
         str_idx = str(idx)
@@ -554,8 +646,15 @@ def run_parallel_validation(
 
         return result
 
-    # --- Per-row parallel loop ---
-    logger.info("=== Per-row parallel validation: %d rows, legs=%s ===", len(df), legs)
+    # --- Collect all row items ---
+    all_items: list[tuple[int, pd.Series]] = [(idx, row) for idx, row in df.iterrows()]
+
+    # --- Choose sequential vs batched path ---
+    effective_concurrency = max(1, concurrency)
+    logger.info(
+        "=== Parallel validation: %d rows, legs=%s, concurrency=%d ===",
+        len(df), legs, effective_concurrency,
+    )
     completed = 0
     validation_start = time.monotonic()
     row_times: list[float] = []
@@ -563,67 +662,168 @@ def run_parallel_validation(
     anthropic_times: list[float] = []
     opus_escalations = 0
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        for idx, row in df.iterrows():
-            row_start = time.monotonic()
-            futures = {}
-            if run_ndif:
-                futures["ndif"] = pool.submit(_ndif_one_row, idx, row)
-            if run_anthropic:
-                futures["anthropic"] = pool.submit(_anthropic_one_row, idx, row)
+    if effective_concurrency <= 1:
+        # --- Original sequential per-row loop (concurrency=1) ---
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            for idx, row in all_items:
+                row_start = time.monotonic()
+                futures = {}
+                if run_ndif:
+                    futures["ndif"] = pool.submit(_ndif_one_row, idx, row)
+                if run_anthropic:
+                    futures["anthropic"] = pool.submit(_anthropic_one_row, idx, row)
 
-            if "ndif" in futures:
-                t0 = time.monotonic()
-                ndif_verdicts[idx] = futures["ndif"].result()
-                ndif_times.append(time.monotonic() - t0)
-            if "anthropic" in futures:
-                t0 = time.monotonic()
-                anthropic_verdicts[idx] = futures["anthropic"].result()
-                anthropic_times.append(time.monotonic() - t0)
-                if "opus" in anthropic_verdicts[idx]:
-                    opus_escalations += 1
+                if "ndif" in futures:
+                    t0 = time.monotonic()
+                    ndif_verdicts[idx] = futures["ndif"].result()
+                    ndif_times.append(time.monotonic() - t0)
+                if "anthropic" in futures:
+                    t0 = time.monotonic()
+                    anthropic_verdicts[idx] = futures["anthropic"].result()
+                    anthropic_times.append(time.monotonic() - t0)
+                    if "opus" in anthropic_verdicts[idx]:
+                        opus_escalations += 1
 
-            row_elapsed = time.monotonic() - row_start
-            row_times.append(row_elapsed)
-            completed += 1
+                row_elapsed = time.monotonic() - row_start
+                row_times.append(row_elapsed)
+                completed += 1
 
-            # Per-row progress summary
-            parts = []
-            if run_ndif:
-                nv = ndif_verdicts.get(idx)
-                if nv and nv.error:
-                    parts.append(f"ndif={nv.error}")
-                elif nv:
-                    parts.append(f"ndif={'T' if nv.says_true else 'F'} conf={nv.confidence:.1f}")
-            if run_anthropic:
-                av = anthropic_verdicts.get(idx, {})
-                sv = av.get("sonnet")
-                if sv and sv.error:
-                    parts.append(f"sonnet={sv.error}")
-                elif sv:
-                    parts.append(f"sonnet={'T' if sv.says_true else 'F'}")
-                if "opus" in av:
-                    ov = av["opus"]
-                    parts.append(f"opus={'T' if ov.says_true else 'F'}")
-            logger.info(
-                "  [%d/%d] %.1fs %s | %s",
-                completed, len(df), row_elapsed,
-                " ".join(parts),
-                row["statement"][:60],
-            )
-
-            # Periodic throughput summary every 25 rows
-            if completed % 25 == 0:
-                elapsed_so_far = time.monotonic() - validation_start
-                rate = completed / elapsed_so_far * 60
-                remaining = len(df) - completed
-                eta_min = remaining / (completed / elapsed_so_far) / 60
+                # Per-row progress summary
+                parts = []
+                if run_ndif:
+                    nv = ndif_verdicts.get(idx)
+                    if nv and nv.error:
+                        parts.append(f"ndif={nv.error}")
+                    elif nv:
+                        parts.append(f"ndif={'T' if nv.says_true else 'F'} conf={nv.confidence:.1f}")
+                if run_anthropic:
+                    av = anthropic_verdicts.get(idx, {})
+                    sv = av.get("sonnet")
+                    if sv and sv.error:
+                        parts.append(f"sonnet={sv.error}")
+                    elif sv:
+                        parts.append(f"sonnet={'T' if sv.says_true else 'F'}")
+                    if "opus" in av:
+                        ov = av["opus"]
+                        parts.append(f"opus={'T' if ov.says_true else 'F'}")
                 logger.info(
-                    "  --- %.1f rows/min | %d/%d done | ETA %.0f min ---",
-                    rate, completed, len(df), eta_min,
+                    "  [%d/%d] %.1fs %s | %s",
+                    completed, len(df), row_elapsed,
+                    " ".join(parts),
+                    row["statement"][:60],
                 )
 
-            # Checkpoint both legs after each row
+                # Periodic throughput summary every 25 rows
+                if completed % 25 == 0:
+                    elapsed_so_far = time.monotonic() - validation_start
+                    rate = completed / elapsed_so_far * 60
+                    remaining = len(df) - completed
+                    eta_min = remaining / (completed / elapsed_so_far) / 60
+                    logger.info(
+                        "  --- %.1f rows/min | %d/%d done | ETA %.0f min ---",
+                        rate, completed, len(df), eta_min,
+                    )
+
+                # Checkpoint both legs after each row
+                if ndif_checkpoint_path and run_ndif:
+                    serializable = {
+                        str(k): {
+                            "says_true": v.says_true,
+                            "agrees_with_label": v.agrees_with_label,
+                            "confidence": v.confidence,
+                            "raw": v.raw,
+                            "error": v.error,
+                        }
+                        for k, v in ndif_verdicts.items()
+                    }
+                    _save_checkpoint(ndif_checkpoint_path, {
+                        "results": serializable,
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    })
+
+                if anthropic_checkpoint_path and run_anthropic:
+                    _save_anthropic_checkpoint(anthropic_checkpoint_path, anthropic_verdicts)
+
+    else:
+        # --- Batched path (concurrency > 1) ---
+        # Process rows in chunks of `concurrency`. Within each chunk:
+        #   - NDIF: single batched call with all prompts (server-side batching)
+        #   - Anthropic: concurrent Sonnet calls via ThreadPoolExecutor
+        # Both legs run in parallel with each other.
+        batch_size = effective_concurrency
+
+        for batch_start in range(0, len(all_items), batch_size):
+            batch = all_items[batch_start:batch_start + batch_size]
+            batch_clock = time.monotonic()
+
+            # Fire NDIF batch and Anthropic concurrency in parallel
+            with ThreadPoolExecutor(max_workers=1 + batch_size) as pool:
+                ndif_future = None
+                anthropic_futures: dict[int, Any] = {}
+
+                if run_ndif:
+                    ndif_future = pool.submit(_ndif_batch, batch)
+                if run_anthropic:
+                    for idx, row in batch:
+                        anthropic_futures[idx] = pool.submit(_anthropic_one_row, idx, row)
+
+                # Collect NDIF batch results
+                if ndif_future is not None:
+                    t0 = time.monotonic()
+                    batch_ndif_results = ndif_future.result()
+                    ndif_elapsed = time.monotonic() - t0
+                    ndif_times.append(ndif_elapsed)
+                    ndif_verdicts.update(batch_ndif_results)
+
+                # Collect Anthropic results
+                for idx, fut in anthropic_futures.items():
+                    t0 = time.monotonic()
+                    anthropic_verdicts[idx] = fut.result()
+                    anthropic_times.append(time.monotonic() - t0)
+                    if "opus" in anthropic_verdicts[idx]:
+                        opus_escalations += 1
+
+            batch_elapsed = time.monotonic() - batch_clock
+            completed += len(batch)
+
+            # Per-row progress for each row in the batch
+            for idx, row in batch:
+                parts = []
+                if run_ndif:
+                    nv = ndif_verdicts.get(idx)
+                    if nv and nv.error:
+                        parts.append(f"ndif={nv.error}")
+                    elif nv:
+                        parts.append(f"ndif={'T' if nv.says_true else 'F'} conf={nv.confidence:.1f}")
+                if run_anthropic:
+                    av = anthropic_verdicts.get(idx, {})
+                    sv = av.get("sonnet")
+                    if sv and sv.error:
+                        parts.append(f"sonnet={sv.error}")
+                    elif sv:
+                        parts.append(f"sonnet={'T' if sv.says_true else 'F'}")
+                    if "opus" in av:
+                        ov = av["opus"]
+                        parts.append(f"opus={'T' if ov.says_true else 'F'}")
+                logger.info(
+                    "  [%d/%d] %s | %s",
+                    completed, len(df),
+                    " ".join(parts),
+                    row["statement"][:60],
+                )
+
+            # Batch-level throughput
+            row_times.append(batch_elapsed)
+            elapsed_so_far = time.monotonic() - validation_start
+            rate = completed / elapsed_so_far * 60
+            remaining = len(df) - completed
+            eta_min = remaining / (completed / elapsed_so_far) / 60 if completed > 0 else 0
+            logger.info(
+                "  --- batch %d rows in %.1fs (%.1f rows/min, %d/%d done, ETA %.0f min) ---",
+                len(batch), batch_elapsed, rate, completed, len(df), eta_min,
+            )
+
+            # Checkpoint after each batch (all rows in batch are complete)
             if ndif_checkpoint_path and run_ndif:
                 serializable = {
                     str(k): {
@@ -647,7 +847,7 @@ def run_parallel_validation(
     logger.info("Parallel validation complete: %d rows in %.1fs", completed, total_elapsed)
 
     # Timing summary
-    if row_times:
+    if effective_concurrency <= 1 and row_times:
         avg_row = sum(row_times) / len(row_times)
         logger.info(
             "  Timing: %.1fs/row avg, %.1fs/row median",

@@ -209,6 +209,7 @@ def _validate_from_ledger(args: argparse.Namespace, ledger_dir: Path) -> None:
 
     ndif_verdicts, anthropic_verdicts = run_parallel_validation(
         candidates_df, legs=legs, checkpoint_dir=checkpoint_dir,
+        concurrency=args.concurrency,
     )
 
     validated = merge_verdicts(candidates_df, ndif_verdicts, anthropic_verdicts)
@@ -273,6 +274,12 @@ def main():
     parser.add_argument(
         "--skip-grammar", action="store_true",
         help="Skip grammar scanning and correction (Layers 2 & 3).",
+    )
+    parser.add_argument(
+        "--concurrency", type=int, default=1,
+        help="Number of rows to validate simultaneously (default: 1). "
+             "At concurrency > 1, NDIF uses server-side batching and "
+             "Anthropic calls run concurrently. Values of 4-8 are recommended.",
     )
     args = parser.parse_args()
 
@@ -387,6 +394,7 @@ def main():
 
         ndif_verdicts, anthropic_verdicts = run_parallel_validation(
             candidates_df, legs=legs, checkpoint_dir=checkpoint_dir,
+            concurrency=args.concurrency,
         )
 
         validated = merge_verdicts(candidates_df, ndif_verdicts, anthropic_verdicts)
