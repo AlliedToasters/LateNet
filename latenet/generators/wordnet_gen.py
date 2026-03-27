@@ -46,6 +46,7 @@ class WordNetGenerator(BaseGenerator):
         rel_types: set[RelationshipType] | None = None,
         max_false_per_true: int = 3,
         min_lemma_frequency: int = 0,
+        max_pairs_per_source: int = 3,
     ):
         super().__init__(seed=seed, max_pairs=max_pairs)
         self.max_depth = max_depth
@@ -53,6 +54,7 @@ class WordNetGenerator(BaseGenerator):
         self.rel_types = rel_types
         self.max_false_per_true = max_false_per_true
         self.min_lemma_frequency = min_lemma_frequency
+        self.max_pairs_per_source = max_pairs_per_source
 
     @property
     def name(self) -> str:
@@ -131,7 +133,7 @@ class WordNetGenerator(BaseGenerator):
                     true_statement=true_statement,
                     false_statement=false_stmt,
                     pair_id=pair_id,
-                    domain=rel.domain,
+                    domain="wordnet",
                     relation_type=rel.rel_type.value,
                     difficulty=difficulty,
                     semantic_distance=dist,
@@ -170,6 +172,10 @@ class WordNetGenerator(BaseGenerator):
         active = list(range(len(iterators)))
         count = 0
 
+        # Per-source-synset cap to prevent a single holonym/hypernym from
+        # dominating the output (e.g., "outer space" producing 45% of meronymy)
+        source_counts: dict[str, int] = defaultdict(int)
+
         # Round-robin across relationship types so max_pairs doesn't starve later types
         while active:
             next_active = []
@@ -178,6 +184,12 @@ class WordNetGenerator(BaseGenerator):
                     pair = next(iterators[idx])
                 except StopIteration:
                     continue
+                # Enforce per-source diversity
+                src = pair.source_synset or ""
+                if source_counts[src] >= self.max_pairs_per_source:
+                    next_active.append(idx)
+                    continue
+                source_counts[src] += 1
                 yield pair
                 count += 1
                 counts_by_type[rel_types[idx].value] += 1

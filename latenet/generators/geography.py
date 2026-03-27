@@ -548,6 +548,9 @@ class GeographyGenerator(BaseGenerator):
         self.rng.shuffle(names)
 
         templates = _ALL_TEMPLATES["population_greater"]
+        # Cap per-country appearances to prevent tiny/huge countries from dominating
+        country_counts: dict[str, int] = {}
+        max_per_country = 5
 
         for i, a in enumerate(names):
             for j in range(i + 1, len(names)):
@@ -557,6 +560,12 @@ class GeographyGenerator(BaseGenerator):
                 pop_big, pop_small = max(pop_a, pop_b), min(pop_a, pop_b)
 
                 if pop_small <= 0 or pop_big / pop_small < self.magnitude_ratio:
+                    continue
+
+                # Enforce per-country cap
+                if country_counts.get(a, 0) >= max_per_country:
+                    break
+                if country_counts.get(b, 0) >= max_per_country:
                     continue
 
                 template = templates[self.rng.randint(0, len(templates) - 1)]
@@ -573,6 +582,9 @@ class GeographyGenerator(BaseGenerator):
                     diff = Difficulty.MEDIUM.value
                 else:
                     diff = Difficulty.EASY.value
+
+                country_counts[a] = country_counts.get(a, 0) + 1
+                country_counts[b] = country_counts.get(b, 0) + 1
 
                 yield ContrastivePair(
                     true_statement=true_stmt,
@@ -597,6 +609,9 @@ class GeographyGenerator(BaseGenerator):
         self.rng.shuffle(names)
 
         templates = _ALL_TEMPLATES["area_greater"]
+        # Cap per-country appearances to prevent tiny countries from dominating
+        country_counts: dict[str, int] = {}
+        max_per_country = 5
 
         for i, a in enumerate(names):
             for j in range(i + 1, len(names)):
@@ -606,6 +621,12 @@ class GeographyGenerator(BaseGenerator):
                 area_big, area_small = max(area_a, area_b), min(area_a, area_b)
 
                 if area_small <= 0 or area_big / area_small < self.magnitude_ratio:
+                    continue
+
+                # Enforce per-country cap
+                if country_counts.get(a, 0) >= max_per_country:
+                    break  # a is saturated, skip rest of inner loop
+                if country_counts.get(b, 0) >= max_per_country:
                     continue
 
                 template = templates[self.rng.randint(0, len(templates) - 1)]
@@ -622,6 +643,9 @@ class GeographyGenerator(BaseGenerator):
                     diff = Difficulty.MEDIUM.value
                 else:
                     diff = Difficulty.EASY.value
+
+                country_counts[a] = country_counts.get(a, 0) + 1
+                country_counts[b] = country_counts.get(b, 0) + 1
 
                 yield ContrastivePair(
                     true_statement=true_stmt,
