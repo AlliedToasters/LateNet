@@ -39,7 +39,7 @@ false_id = tok.encode("False", add_special_tokens=False)[0]
 ext = ActivationExtractor(
     model_name=MODEL,
     device="cpu",
-    layers=[0],       # layer doesn't matter — we want logits, not activations
+    layers=[],        # no activations — logits only
     backend="nnsight",
 )
 
@@ -51,15 +51,22 @@ def chat_format(stmt):
         "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
     )
 
-# Extract logits remotely via NDIF
+# Extract logits remotely via NDIF (logits-only, top-k=10)
 prompt = chat_format("The city of Paris is in France.")
-_acts, _mask, logits, _ = ext.extract_batch_with_logits(
-    [prompt], [0], remote=True
+logits, _mask, logits_indices = ext.extract_logits_only(
+    [prompt], remote=True, logit_top_k=10,
 )
 
 last_logits = logits[0, -1, :]
-t_logit = last_logits[true_id].item()
-f_logit = last_logits[false_id].item()
+last_indices = logits_indices[0, -1, :]
+# Find True/False logits in the top-k
+t_logit = float("-inf")
+f_logit = float("-inf")
+for i, vid in enumerate(last_indices.tolist()):
+    if vid == true_id:
+        t_logit = last_logits[i].item()
+    elif vid == false_id:
+        f_logit = last_logits[i].item()
 model_says_true = t_logit > f_logit
 logit_gap = abs(t_logit - f_logit)  # confidence signal
 ```
@@ -75,10 +82,10 @@ logit_gap = abs(t_logit - f_logit)  # confidence signal
 ```python
 for attempt in range(max_retries):
     try:
-        _acts, _mask, logits, _ = ext.extract_batch_with_logits(
-            [prompt], [0], remote=True
+        logits, _mask, logits_indices = ext.extract_logits_only(
+            [prompt], remote=True, logit_top_k=10,
         )
-        # ... parse logits ...
+        # ... parse top-k logits ...
         break
     except Exception as e:
         if attempt < max_retries - 1:
@@ -235,7 +242,7 @@ Source: `latent-lab/experiments/got_lodo/`
 The core pattern to reuse:
 
 1. **Prompt**: Simple forced-choice question with single-word response
-2. **NDIF leg**: `ActivationExtractor(backend="nnsight")` + `extract_batch_with_logits(remote=True)` for logit-level judgments from 405B without a local GPU
+2. **NDIF leg**: `ActivationExtractor(backend="nnsight")` + `extract_logits_only(remote=True, logit_top_k=10)` for logit-level judgments from 405B without a local GPU
 3. **Anthropic leg**: Sonnet first pass (cheap), Opus escalation only on disagreements (~1% of rows)
 4. **Consensus**: Drop rows where any validator disagrees
 5. **Checkpoint everything**: NDIF is flaky, API calls are slow — resumability is mandatory

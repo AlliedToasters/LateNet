@@ -123,11 +123,11 @@ def run_ndif_leg(
     true_id = tok.encode("True", add_special_tokens=False)[0]
     false_id = tok.encode("False", add_special_tokens=False)[0]
 
-    # Lightweight remote extractor — no local GPU needed
+    # Lightweight remote extractor — logits only, no activations downloaded
     ext = ActivationExtractor(
         model_name=LLAMA_MODEL,
         device="cpu",
-        layers=[0],
+        layers=[],
         backend="nnsight",
         remote=True,
     )
@@ -150,17 +150,16 @@ def run_ndif_leg(
         verdict = RowVerdict()
 
         try:
-            _acts, _mask, logits, logits_indices = retry_with_backoff(
-                lambda p=prompt: ext.extract_batch_with_logits(
-                    [p], [0], remote=True, logit_top_k=10,
+            logits, _mask, logits_indices = retry_with_backoff(
+                lambda p=prompt: ext.extract_logits_only(
+                    [p], remote=True, logit_top_k=10,
                 ),
                 max_retries=max_retries,
                 base_delay=3.0,
                 max_delay=120.0,
                 context=f"NDIF row {idx}",
             )
-            # With top_k, logits are (batch, seq, k) and logits_indices
-            # maps positions back to vocab IDs
+            # logits: (batch, seq, k), logits_indices: (batch, seq, k) vocab IDs
             last_logits = logits[0, -1, :]         # shape (k,)
             last_indices = logits_indices[0, -1, :]  # shape (k,)
             t_logit = float("-inf")
@@ -424,7 +423,7 @@ def run_parallel_validation(
         ndif_ext = ActivationExtractor(
             model_name=LLAMA_MODEL,
             device="cpu",
-            layers=[0],
+            layers=[],
             backend="nnsight",
             remote=True,
         )
@@ -473,9 +472,9 @@ def run_parallel_validation(
 
         prompt = _chat_format(row["statement"])
         try:
-            _acts, _mask, logits, logits_indices = retry_with_backoff(
-                lambda p=prompt: ndif_ext.extract_batch_with_logits(
-                    [p], [0], remote=True, logit_top_k=10,
+            logits, _mask, logits_indices = retry_with_backoff(
+                lambda p=prompt: ndif_ext.extract_logits_only(
+                    [p], remote=True, logit_top_k=10,
                 ),
                 max_retries=5,
                 base_delay=3.0,
@@ -574,6 +573,31 @@ def run_parallel_validation(
 
             completed += 1
 
+            # Per-row progress summary
+            parts = []
+            if run_ndif:
+                nv = ndif_verdicts.get(idx)
+                if nv and nv.error:
+                    parts.append(f"ndif={nv.error}")
+                elif nv:
+                    parts.append(f"ndif={'T' if nv.says_true else 'F'} conf={nv.confidence:.1f}")
+            if run_anthropic:
+                av = anthropic_verdicts.get(idx, {})
+                sv = av.get("sonnet")
+                if sv and sv.error:
+                    parts.append(f"sonnet={sv.error}")
+                elif sv:
+                    parts.append(f"sonnet={'T' if sv.says_true else 'F'}")
+                if "opus" in av:
+                    ov = av["opus"]
+                    parts.append(f"opus={'T' if ov.says_true else 'F'}")
+            logger.info(
+                "  [%d/%d] %s | %s",
+                completed, len(df),
+                " ".join(parts),
+                row["statement"][:60],
+            )
+
             # Checkpoint both legs after each row
             if ndif_checkpoint_path and run_ndif:
                 serializable = {
@@ -593,9 +617,6 @@ def run_parallel_validation(
 
             if anthropic_checkpoint_path and run_anthropic:
                 _save_anthropic_checkpoint(anthropic_checkpoint_path, anthropic_verdicts)
-
-            if completed % 50 == 0:
-                logger.info("  %d/%d rows complete", completed, len(df))
 
     logger.info("Parallel validation complete: %d rows", completed)
 
