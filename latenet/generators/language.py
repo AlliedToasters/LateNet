@@ -204,11 +204,17 @@ class LanguageGenerator(BaseGenerator):
         self._lang_words = {}
         self._entity_domains = {}
 
+        # Filter out proper nouns, obscure terms, and unattested words
+        _excluded = self._filter_obscure_words(df)
+
         for _, row in df.iterrows():
             en = str(row["source_word"])
             lang = str(row["target_lang"])
             target = str(row["target_word"])
             domain = str(row.get("domain", "other"))
+
+            if en.lower() in _excluded:
+                continue
 
             self._translation_map[(en, lang)] = target
             self._domain_entities.setdefault(domain, [])
@@ -218,6 +224,44 @@ class LanguageGenerator(BaseGenerator):
             self._lang_words.setdefault(lang, set()).add(target.lower())
 
         self._all_english = sorted(set(self._entity_domains.keys()))
+
+    @staticmethod
+    def _filter_obscure_words(df: pd.DataFrame) -> set[str]:
+        """Filter source words to well-known English vocabulary only.
+
+        Uses WordNet synset existence and lemma frequency counts (from the
+        Brown corpus) to exclude proper nouns, obscure terms, and jargon.
+        This is a one-time quality gate on the MUSE data.
+
+        Returns set of lowercase words to EXCLUDE.
+        """
+        from nltk.corpus import wordnet as wn
+
+        candidates = set(df["source_word"].str.lower().unique())
+        exclude = set()
+        for word in candidates:
+            if len(word) <= 2:
+                exclude.add(word)
+                continue
+            if any(c.isdigit() for c in word):
+                exclude.add(word)
+                continue
+            # Must have a WordNet synset (noun or verb)
+            synsets = wn.synsets(word, pos=wn.NOUN) + wn.synsets(word, pos=wn.VERB)
+            if not synsets:
+                exclude.add(word)
+                continue
+            # Must have non-zero lemma frequency in at least one synset
+            # (attested in the Brown corpus — filters out obscure/technical terms)
+            max_freq = max(
+                (lemma.count() for ss in synsets for lemma in ss.lemmas()
+                 if lemma.name().lower() == word),
+                default=0,
+            )
+            if max_freq == 0:
+                exclude.add(word)
+
+        return exclude
 
     # --- Helpers ---
 
