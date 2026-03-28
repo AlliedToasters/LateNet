@@ -38,6 +38,14 @@ def _domain_for_synset(synset, target_depth: int = 2) -> str:
     return ancestor.lemma_names()[0].replace("_", " ")
 
 
+def _max_lemma_count(synset) -> int:
+    """Return the maximum lemma frequency count for any lemma in a synset.
+
+    Uses the Brown corpus counts bundled with NLTK's WordNet.
+    """
+    return max((lemma.count() for lemma in synset.lemmas()), default=0)
+
+
 @dataclass
 class WalkerConfig:
     seed: int = 42
@@ -47,6 +55,7 @@ class WalkerConfig:
         default_factory=lambda: set(RelationshipType)
     )
     pos: str = "n"
+    frequency_weighted: bool = True
 
 
 class WordNetWalker:
@@ -55,10 +64,26 @@ class WordNetWalker:
         self.rng = random.Random(self.config.seed)
 
     def walk(self) -> list[Relationship]:
-        """Traverse WordNet and return extracted relationships."""
+        """Traverse WordNet and return extracted relationships.
+
+        When frequency_weighted is True, synsets are traversed in an order
+        biased toward high-frequency lemmas (Brown corpus counts), so that
+        well-known concepts are explored first and dominate generation when
+        max_pairs is set.
+        """
         synsets = list(wn.all_synsets(self.config.pos))
         synsets = [s for s in synsets if s.min_depth() <= self.config.max_depth]
-        self.rng.shuffle(synsets)
+
+        if self.config.frequency_weighted:
+            # Sort synsets by lemma frequency (descending) with random
+            # tiebreaking within each frequency bucket. This ensures
+            # high-frequency synsets are explored first, so when max_pairs
+            # truncates generation the output is biased toward well-known
+            # concepts. Zero-count synsets are shuffled at the tail.
+            self.rng.shuffle(synsets)  # random tiebreaking
+            synsets.sort(key=lambda s: _max_lemma_count(s), reverse=True)
+        else:
+            self.rng.shuffle(synsets)
 
         all_rels: list[Relationship] = []
         for synset in synsets:

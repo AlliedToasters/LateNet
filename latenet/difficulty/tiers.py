@@ -14,6 +14,20 @@ from latenet.types import Difficulty
 MAX_SIBLING_POOL = 20
 
 
+def _max_lemma_count(synset: Synset) -> int:
+    """Max lemma frequency for a synset (Brown corpus)."""
+    return max((lemma.count() for lemma in synset.lemmas()), default=0)
+
+
+def _frequency_weighted_choice(pool: list[Synset], rng: random.Random) -> Synset:
+    """Pick from pool with probability proportional to lemma frequency.
+
+    Uses floor=1 so zero-count synsets still have a chance.
+    """
+    weights = [max(_max_lemma_count(s), 1) for s in pool]
+    return rng.choices(pool, weights=weights, k=1)[0]
+
+
 def classify_difficulty(hop_count: int | None) -> Difficulty:
     """Map hop distance to difficulty tier."""
     if hop_count is None:
@@ -66,17 +80,17 @@ def _cousins_of(synset: Synset) -> list[Synset]:
 
 
 def _distant_synset(synset: Synset, rng: random.Random) -> Synset | None:
-    """Pick a random noun synset from a different root hypernym tree."""
+    """Pick a noun synset from a different root hypernym tree, weighted by frequency."""
     source_roots = {r.name() for r in synset.root_hypernyms()}
     by_root = _synsets_by_root()
 
     other_roots = [k for k in by_root if k not in source_roots]
     if not other_roots:
         all_synsets = [s for ss in by_root.values() for s in ss if s.name() != synset.name()]
-        return rng.choice(all_synsets) if all_synsets else None
+        return _frequency_weighted_choice(all_synsets, rng) if all_synsets else None
 
     root = rng.choice(other_roots)
-    return rng.choice(by_root[root])
+    return _frequency_weighted_choice(by_root[root], rng)
 
 
 def pick_negation_synset(
@@ -103,4 +117,4 @@ def pick_negation_synset(
     if len(pool) > MAX_SIBLING_POOL:
         pool = rng.sample(pool, MAX_SIBLING_POOL)
 
-    return rng.choice(pool)
+    return _frequency_weighted_choice(pool, rng)
