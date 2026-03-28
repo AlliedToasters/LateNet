@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import box
@@ -91,6 +93,16 @@ def _patch_data(gen):
         cc = row["country_code"]
         if cc in gen._cc_to_name:
             gen._city_country[row["name"]] = gen._cc_to_name[cc]
+
+    # Log-population weights (mirrors _load_data)
+    country_pops = gen._countries["POP_EST"].tolist()
+    log_country_pops = [math.log(max(float(p), 1.0)) for p in country_pops]
+    gen._country_weights = gen.build_weights(log_country_pops)
+    gen._country_name_to_idx = {n: i for i, n in enumerate(gen._countries["_name"].tolist())}
+
+    city_pops = gen._cities["population"].tolist()
+    log_city_pops = [math.log(max(float(p), 1.0)) for p in city_pops]
+    gen._city_weights = gen.build_weights(log_city_pops)
 
 
 def _make_generator(**kwargs) -> GeographyGenerator:

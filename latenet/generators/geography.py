@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -195,6 +196,24 @@ class GeographyGenerator(BaseGenerator):
             if cc in self._cc_to_name:
                 self._city_country[row["name"]] = self._cc_to_name[cc]
 
+        # Build log-population weights for countries and cities
+        country_pops = self._countries["POP_EST"].tolist()
+        log_country_pops = [
+            math.log(max(float(p) if pd.notna(p) else 1.0, 1.0))
+            for p in country_pops
+        ]
+        self._country_weights: list[float] = self.build_weights(log_country_pops)
+        self._country_name_to_idx: dict[str, int] = {
+            n: i for i, n in enumerate(self._countries["_name"].tolist())
+        }
+
+        city_pops = self._cities["population"].tolist()
+        log_city_pops = [
+            math.log(max(float(p) if pd.notna(p) else 1.0, 1.0))
+            for p in city_pops
+        ]
+        self._city_weights: list[float] = self.build_weights(log_city_pops)
+
         logger.info(
             "Geography data loaded: %d countries, %d cities",
             len(self._countries), len(self._cities),
@@ -263,7 +282,6 @@ class GeographyGenerator(BaseGenerator):
     def _generate_containment(self) -> Iterator[ContrastivePair]:
         """City in Country pairs with swapped-country false statements."""
         cities = self._cities.copy()
-        countries = self._countries
 
         # Build city -> true country mapping
         city_rows = []
@@ -277,9 +295,14 @@ class GeographyGenerator(BaseGenerator):
                 "country": country_name,
                 "lat": row["latitude"],
                 "lon": row["longitude"],
+                "population": float(row["population"]) if pd.notna(row["population"]) else 1.0,
             })
 
-        self.rng.shuffle(city_rows)
+        # Order by log-population weight so large cities appear first when max_pairs truncates
+        log_pops = [math.log(max(r["population"], 1.0)) for r in city_rows]
+        city_w = self.build_weights(log_pops)
+        ordered_indices = self.weighted_sample(list(range(len(city_rows))), city_w, n=len(city_rows))
+        city_rows = [city_rows[i] for i in ordered_indices]
 
         country_names = list(self._countries["_name"])
         templates = _ALL_TEMPLATES["contained_in"]
@@ -327,36 +350,50 @@ class GeographyGenerator(BaseGenerator):
         """Pick swap countries at hard/medium/easy difficulty."""
         swaps = []
 
-        # Hard: neighboring country
+        # Hard: neighboring country — pick by log-population weight
         neighbors = self._neighbor_map.get(true_country, [])
         if neighbors:
-            n = self.rng.choice(neighbors)
-            swaps.append((n, Difficulty.HARD.value, NegationStrategy.SIBLING_SWAP.value))
+            neighbor_idx = [self._country_name_to_idx[c] for c in neighbors if c in self._country_name_to_idx]
+            if neighbor_idx:
+                picked = self.weighted_pick(neighbor_idx, self._country_weights, k=1)
+                if picked:
+                    swaps.append((all_countries[picked[0]], Difficulty.HARD.value, NegationStrategy.SIBLING_SWAP.value))
 
-        # Medium: same continent, non-neighbor
+        # Medium: same continent, non-neighbor — pick by log-population weight
+        neighbor_set = set(neighbors)
         if continent:
-            same_cont = [
-                c for c in all_countries
+            same_cont_idx = [
+                self._country_name_to_idx[c]
+                for c in all_countries
                 if self._country_continent.get(c) == continent
                 and c != true_country
-                and c not in neighbors
+                and c not in neighbor_set
+                and c in self._country_name_to_idx
             ]
-            if same_cont:
-                m = self.rng.choice(same_cont)
-                swaps.append((m, Difficulty.MEDIUM.value, NegationStrategy.SIBLING_SWAP.value))
+            if same_cont_idx:
+                picked = self.weighted_pick(same_cont_idx, self._country_weights, k=1)
+                if picked:
+                    swaps.append((all_countries[picked[0]], Difficulty.MEDIUM.value, NegationStrategy.SIBLING_SWAP.value))
 
-        # Easy: different continent
+        # Easy: different continent — pick by log-population weight
         if continent:
-            diff_cont = [
-                c for c in all_countries
+            diff_cont_idx = [
+                self._country_name_to_idx[c]
+                for c in all_countries
                 if self._country_continent.get(c) != continent
                 and self._country_continent.get(c) is not None
+                and c in self._country_name_to_idx
             ]
         else:
-            diff_cont = [c for c in all_countries if c != true_country]
-        if diff_cont:
-            e = self.rng.choice(diff_cont)
-            swaps.append((e, Difficulty.EASY.value, NegationStrategy.DISTANT_SWAP.value))
+            diff_cont_idx = [
+                self._country_name_to_idx[c]
+                for c in all_countries
+                if c != true_country and c in self._country_name_to_idx
+            ]
+        if diff_cont_idx:
+            picked = self.weighted_pick(diff_cont_idx, self._country_weights, k=1)
+            if picked:
+                swaps.append((all_countries[picked[0]], Difficulty.EASY.value, NegationStrategy.DISTANT_SWAP.value))
 
         return swaps
 
@@ -370,9 +407,9 @@ class GeographyGenerator(BaseGenerator):
         lon_map = dict(zip(countries["_name"], countries["_lon"]))
 
         # Generate pairs for north/south and east/west
+        # Order countries by log-population weight so prominent countries appear first
         pairs_seen: set[tuple[str, str, str]] = set()
-        indices = list(range(len(names)))
-        self.rng.shuffle(indices)
+        indices = self.weighted_sample(list(range(len(names))), self._country_weights, n=len(names))
 
         templates = _ALL_TEMPLATES["cardinal_direction"]
 
@@ -497,27 +534,39 @@ class GeographyGenerator(BaseGenerator):
             row["name"]: (row["latitude"], row["longitude"])
             for _, row in cities.iterrows()
         }
+        city_pops_prox = [
+            float(p) if pd.notna(p) else 1.0
+            for p in cities["population"].tolist()
+        ]
+        log_pops_prox = [math.log(max(p, 1.0)) for p in city_pops_prox]
+        prox_weights = self.build_weights(log_pops_prox)
 
-        self.rng.shuffle(city_names)
         templates = _ALL_TEMPLATES["closer_to"]
 
-        # Sample triples
-        n = min(len(city_names), 500)  # Cap to avoid combinatorial explosion
-        sample = city_names[:n]
+        # Sample pool weighted by log-population; cap to avoid combinatorial explosion
+        pool_size = min(len(city_names), 500)
+        pool_indices = self.weighted_sample(list(range(len(city_names))), prox_weights, n=pool_size)
+        sample = [city_names[i] for i in pool_indices]
+        sample_weights = [prox_weights[i] for i in pool_indices]
+        # Normalize sample weights for within-pool picks
+        sample_w_total = sum(sample_weights)
+        sample_weights_norm = [w / sample_w_total for w in sample_weights]
 
         for i, anchor in enumerate(sample):
-            if i >= n:
-                break
-            # Pick two other cities
-            others = [c for c in sample if c != anchor]
-            if len(others) < 2:
+            # Pick two other cities weighted by log-population
+            other_idx = [j for j in range(len(sample)) if sample[j] != anchor]
+            if len(other_idx) < 2:
                 continue
 
-            near = self.rng.choice(others)
-            far_candidates = [c for c in others if c != near]
-            if not far_candidates:
+            near_picks = self.rng.choices(other_idx, weights=[sample_weights_norm[j] for j in other_idx], k=1)
+            near_i = near_picks[0]
+            near = sample[near_i]
+
+            far_idx = [j for j in other_idx if j != near_i]
+            if not far_idx:
                 continue
-            far = self.rng.choice(far_candidates)
+            far_picks = self.rng.choices(far_idx, weights=[sample_weights_norm[j] for j in far_idx], k=1)
+            far = sample[far_picks[0]]
 
             coord_a = city_coords[anchor]
             coord_near = city_coords[near]
@@ -583,8 +632,12 @@ class GeographyGenerator(BaseGenerator):
         """Country A has larger population than Country B."""
         countries = self._countries
         pop_map = dict(zip(countries["_name"], countries["POP_EST"]))
-        names = [n for n in countries["_name"] if pd.notna(pop_map.get(n)) and pop_map[n] > 0]
-        self.rng.shuffle(names)
+        valid_idx = [
+            i for i, n in enumerate(countries["_name"])
+            if pd.notna(pop_map.get(n)) and pop_map[n] > 0
+        ]
+        ordered = self.weighted_sample(valid_idx, self._country_weights, n=len(valid_idx))
+        names = [countries["_name"].iloc[i] for i in ordered]
 
         templates = _ALL_TEMPLATES["population_greater"]
         # Cap per-country appearances to prevent tiny/huge countries from dominating
@@ -651,8 +704,12 @@ class GeographyGenerator(BaseGenerator):
         """Country A is larger in area than Country B."""
         countries = self._countries
         area_map = dict(zip(countries["_name"], countries["_area_km2"]))
-        names = [n for n in countries["_name"] if pd.notna(area_map.get(n)) and area_map[n] > 0]
-        self.rng.shuffle(names)
+        valid_idx = [
+            i for i, n in enumerate(countries["_name"])
+            if pd.notna(area_map.get(n)) and area_map[n] > 0
+        ]
+        ordered = self.weighted_sample(valid_idx, self._country_weights, n=len(valid_idx))
+        names = [countries["_name"].iloc[i] for i in ordered]
 
         templates = _ALL_TEMPLATES["area_greater"]
         # Cap per-country appearances to prevent tiny countries from dominating
