@@ -161,25 +161,14 @@ class AstronomyGenerator(BaseGenerator):
     # --- Main generate ---
 
     def generate(self) -> Iterator[ContrastivePair]:
-        count = 0
-        generators = [
+        yield from self._round_robin_generate([
             self._generate_orbits,
             self._generate_ordering,
             self._generate_magnitude,
             self._generate_classification,
             self._generate_star_property,
             self._generate_constellation,
-        ]
-        counts_by_relation: dict[str, int] = {}
-        for gen_fn in generators:
-            for pair in gen_fn():
-                counts_by_relation[pair.relation_type] = counts_by_relation.get(pair.relation_type, 0) + 1
-                yield pair
-                count += 1
-                if self.max_pairs is not None and count >= self.max_pairs:
-                    logger.info("Astronomy pair counts: %s", counts_by_relation)
-                    return
-        logger.info("Astronomy pair counts: %s", counts_by_relation)
+        ])
 
     # --- Helpers ---
 

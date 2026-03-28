@@ -201,19 +201,11 @@ class AuthorshipGenerator(BaseGenerator):
         if self._data is None or self._data.empty:
             return
 
-        count = 0
-        generators = [
+        yield from self._round_robin_generate([
             self._generate_created_by,
             self._generate_author_of,
             self._generate_domain_attribution,
-        ]
-
-        for gen_fn in generators:
-            for pair in gen_fn():
-                yield pair
-                count += 1
-                if self.max_pairs is not None and count >= self.max_pairs:
-                    return
+        ])
 
     # --- Helpers ---
 

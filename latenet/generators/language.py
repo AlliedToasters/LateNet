@@ -332,92 +332,103 @@ class LanguageGenerator(BaseGenerator):
         if self._data is None or self._data.empty:
             return
 
-        count = 0
-        generators = [
+        yield from self._round_robin_generate([
             self._generate_translates_to,
             self._generate_translation_of,
             self._generate_word_is_language,
-        ]
-
-        for gen_fn in generators:
-            for pair in gen_fn():
-                yield pair
-                count += 1
-                if self.max_pairs is not None and count >= self.max_pairs:
-                    return
+        ])
 
     # --- translates_to ---
 
     def _generate_translates_to(self) -> Iterator[ContrastivePair]:
-        """Generate 'The {language} word for {english} is {translation}' pairs."""
+        """Generate 'The {language} word for {english} is {translation}' pairs.
+
+        Yields one pair per word per pass to maximise vocabulary diversity,
+        then loops back for additional languages/difficulties.
+        """
         entities = list(self._all_english)
         self.rng.shuffle(entities)
 
         per_lang_counts: dict[str, int] = {}
         per_domain_counts: dict[str, int] = {}
 
+        # Build a queue of (word, lang, difficulty) triples, interleaved by word
+        triples: list[tuple[str, str, str, str, str]] = []
         for english in entities:
             domain = self._entity_domains[english]
-
             langs = list(self.target_languages)
             self.rng.shuffle(langs)
-
             for lang in langs:
                 true_translation = self._get_translation(english, lang)
                 if not true_translation:
                     continue
+                swaps = self._pick_translates_to_swaps(english, lang, true_translation)
+                for swap_translation, difficulty, strategy in swaps:
+                    triples.append((english, lang, true_translation, swap_translation, difficulty, strategy))
 
-                # Enforce per-language and per-domain caps
+        # Sort by word to group, then interleave: take first triple from each word, then second, etc.
+        by_word: dict[str, list] = {}
+        for t in triples:
+            by_word.setdefault(t[0], []).append(t)
+        word_order = list(by_word.keys())
+        self.rng.shuffle(word_order)
+
+        max_depth = max((len(v) for v in by_word.values()), default=0)
+        for depth in range(max_depth):
+            for word in word_order:
+                items = by_word[word]
+                if depth >= len(items):
+                    continue
+                english, lang, true_translation, swap_translation, difficulty, strategy = items[depth]
+                domain = self._entity_domains[english]
+
                 if self.per_language_cap and per_lang_counts.get(lang, 0) >= self.per_language_cap:
                     continue
                 if self.per_domain_cap and per_domain_counts.get(domain, 0) >= self.per_domain_cap:
                     continue
 
-                # Generate at each difficulty tier
-                swaps = self._pick_translates_to_swaps(english, lang, true_translation)
-                for swap_translation, difficulty, strategy in swaps:
-                    template = self._pick_template("translates_to")
-                    lang_name = self._lang_display(lang)
+                template = self._pick_template("translates_to")
+                lang_name = self._lang_display(lang)
 
-                    true_stmt = render_template(template.pattern,
-                        language=lang_name, english=english, translation=true_translation,
-                    )
-                    false_stmt = render_template(template.pattern,
-                        language=lang_name, english=english, translation=swap_translation,
-                    )
+                true_stmt = render_template(template.pattern,
+                    language=lang_name, english=english, translation=true_translation,
+                )
+                false_stmt = render_template(template.pattern,
+                    language=lang_name, english=english, translation=swap_translation,
+                )
 
-                    pair_id = _make_pair_id([
-                        "lang", "translate", english, lang,
-                        true_translation, swap_translation, template.id,
-                    ])
+                pair_id = _make_pair_id([
+                    "lang", "translate", english, lang,
+                    true_translation, swap_translation, template.id,
+                ])
 
-                    sem_dist = 1 if difficulty == Difficulty.HARD.value else (
-                        2 if difficulty == Difficulty.MEDIUM.value else 3
-                    )
+                sem_dist = 1 if difficulty == Difficulty.HARD.value else (
+                    2 if difficulty == Difficulty.MEDIUM.value else 3
+                )
 
-                    per_lang_counts[lang] = per_lang_counts.get(lang, 0) + 1
-                    per_domain_counts[domain] = per_domain_counts.get(domain, 0) + 1
+                per_lang_counts[lang] = per_lang_counts.get(lang, 0) + 1
+                per_domain_counts[domain] = per_domain_counts.get(domain, 0) + 1
 
-                    yield ContrastivePair(
-                        true_statement=true_stmt,
-                        false_statement=false_stmt,
-                        pair_id=pair_id,
-                        domain="language",
-                        relation_type="translates_to",
-                        difficulty=difficulty,
-                        semantic_distance=sem_dist,
-                        generator=self.name,
-                        template_id=template.id,
-                        negation_strategy=strategy,
-                        source_synset=english,
-                        target_synset=lang,
-                        gen_params={
-                            "source_word": english,
-                            "target_lang": lang,
-                            "true_translation": true_translation,
-                            "false_translation": swap_translation,
-                        },
-                    )
+                yield ContrastivePair(
+                    true_statement=true_stmt,
+                    false_statement=false_stmt,
+                    pair_id=pair_id,
+                    domain="language",
+                    relation_type="translates_to",
+                    difficulty=difficulty,
+                    semantic_distance=sem_dist,
+                    generator=self.name,
+                    template_id=template.id,
+                    negation_strategy=strategy,
+                    source_synset=english,
+                    target_synset=lang,
+                    gen_params={
+                        "source_word": english,
+                        "target_lang": lang,
+                        "true_translation": true_translation,
+                        "false_translation": swap_translation,
+                    },
+                )
 
     def _pick_translates_to_swaps(
         self, english: str, lang: str, true_translation: str,
@@ -448,31 +459,42 @@ class LanguageGenerator(BaseGenerator):
     # --- translation_of ---
 
     def _generate_translation_of(self) -> Iterator[ContrastivePair]:
-        """Generate '{translation} is the {language} word for {english}' pairs."""
+        """Generate '{translation} is the {language} word for {english}' pairs.
+
+        Interleaved by word for vocabulary diversity.
+        """
         entities = list(self._all_english)
         self.rng.shuffle(entities)
 
+        # Pre-build candidates interleaved by word
+        by_word: dict[str, list] = {}
         for english in entities:
             domain = self._entity_domains[english]
-
             langs = list(self.target_languages)
             self.rng.shuffle(langs)
-
             for lang in langs:
                 true_translation = self._get_translation(english, lang)
                 if not true_translation:
                     continue
-
-                # Swap the meaning: "perro is the Spanish word for cat"
-                # Pick a different english word whose translation exists in this language
                 same_domain = [
                     e for e in self._domain_entities.get(domain, [])
                     if e != english and (e, lang) in self._translation_map
                 ]
                 if not same_domain:
                     continue
-
                 swap_english = self.rng.choice(same_domain)
+                by_word.setdefault(english, []).append((english, lang, true_translation, swap_english))
+
+        word_order = list(by_word.keys())
+        self.rng.shuffle(word_order)
+        max_depth = max((len(v) for v in by_word.values()), default=0)
+
+        for depth in range(max_depth):
+            for word in word_order:
+                items = by_word[word]
+                if depth >= len(items):
+                    continue
+                english, lang, true_translation, swap_english = items[depth]
 
                 template = self._pick_template("translation_of")
                 lang_name = self._lang_display(lang)
@@ -513,65 +535,79 @@ class LanguageGenerator(BaseGenerator):
     # --- word_is_language ---
 
     def _generate_word_is_language(self) -> Iterator[ContrastivePair]:
-        """Generate '{word} is a {language} word' pairs."""
+        """Generate '{word} is a {language} word' pairs.
+
+        Interleaved by word for vocabulary diversity.
+        """
         entities = list(self._all_english)
         self.rng.shuffle(entities)
 
+        by_word: dict[str, list] = {}
         for english in entities:
             langs = list(self.target_languages)
             self.rng.shuffle(langs)
-
             for true_lang in langs:
                 true_translation = self._get_translation(english, true_lang)
                 if not true_translation:
                     continue
-
-                # Skip cognates: only generate if the word is unique to this language
                 if not self._is_unique_to_language(true_translation, true_lang):
                     continue
-
-                # Pick a false language based on difficulty tiers
                 swaps = self._pick_language_id_swaps(true_lang)
                 for false_lang, difficulty in swaps:
-                    template = self._pick_template("word_is_language")
-                    true_lang_name = self._lang_display(true_lang)
-                    false_lang_name = self._lang_display(false_lang)
-
-                    true_stmt = render_template(template.pattern,
-                        word=true_translation, language=true_lang_name,
-                    )
-                    false_stmt = render_template(template.pattern,
-                        word=true_translation, language=false_lang_name,
+                    by_word.setdefault(english, []).append(
+                        (english, true_lang, true_translation, false_lang, difficulty)
                     )
 
-                    pair_id = _make_pair_id([
-                        "lang", "identify", english, true_lang,
-                        true_translation, false_lang, template.id,
-                    ])
+        word_order = list(by_word.keys())
+        self.rng.shuffle(word_order)
+        max_depth = max((len(v) for v in by_word.values()), default=0)
 
-                    dist = _language_distance(true_lang, false_lang)
+        for depth in range(max_depth):
+            for word in word_order:
+                items = by_word[word]
+                if depth >= len(items):
+                    continue
+                english, true_lang, true_translation, false_lang, difficulty = items[depth]
 
-                    yield ContrastivePair(
-                        true_statement=true_stmt,
-                        false_statement=false_stmt,
-                        pair_id=pair_id,
-                        domain="language",
-                        relation_type="word_is_language",
-                        difficulty=difficulty,
-                        semantic_distance=dist,
-                        generator=self.name,
-                        template_id=template.id,
-                        negation_strategy=NegationStrategy.DISTANT_SWAP.value,
-                        source_synset=english,
-                        target_synset=true_lang,
-                        neg_synset=false_lang,
-                        gen_params={
-                            "source_word": english,
-                            "word": true_translation,
-                            "true_lang": true_lang,
-                            "false_lang": false_lang,
-                        },
-                    )
+                template = self._pick_template("word_is_language")
+                true_lang_name = self._lang_display(true_lang)
+                false_lang_name = self._lang_display(false_lang)
+
+                true_stmt = render_template(template.pattern,
+                    word=true_translation, language=true_lang_name,
+                )
+                false_stmt = render_template(template.pattern,
+                    word=true_translation, language=false_lang_name,
+                )
+
+                pair_id = _make_pair_id([
+                    "lang", "identify", english, true_lang,
+                    true_translation, false_lang, template.id,
+                ])
+
+                dist = _language_distance(true_lang, false_lang)
+
+                yield ContrastivePair(
+                    true_statement=true_stmt,
+                    false_statement=false_stmt,
+                    pair_id=pair_id,
+                    domain="language",
+                    relation_type="word_is_language",
+                    difficulty=difficulty,
+                    semantic_distance=dist,
+                    generator=self.name,
+                    template_id=template.id,
+                    negation_strategy=NegationStrategy.DISTANT_SWAP.value,
+                    source_synset=english,
+                    target_synset=true_lang,
+                    neg_synset=false_lang,
+                    gen_params={
+                        "source_word": english,
+                        "word": true_translation,
+                        "true_lang": true_lang,
+                        "false_lang": false_lang,
+                    },
+                )
 
     def _pick_language_id_swaps(
         self, true_lang: str,

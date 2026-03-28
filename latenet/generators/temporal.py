@@ -201,21 +201,13 @@ class TemporalGenerator(BaseGenerator):
     def generate(self) -> Iterator[ContrastivePair]:
         self._load_data()
 
-        count = 0
-        generators = [
+        yield from self._round_robin_generate([
             self._generate_event_ordering,
             self._generate_birth_ordering,
             self._generate_century_attribution,
             self._generate_era_ordering,
             self._generate_contemporaneity,
-        ]
-
-        for gen_fn in generators:
-            for pair in gen_fn():
-                yield pair
-                count += 1
-                if self.max_pairs is not None and count >= self.max_pairs:
-                    return
+        ])
 
     # --- Helpers ---
 

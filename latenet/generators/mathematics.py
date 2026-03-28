@@ -269,42 +269,15 @@ class MathematicsGenerator(BaseGenerator):
 
     def generate(self) -> Iterator[ContrastivePair]:
         self._build_pools()
-        count = 0
 
-        sub_generators = [
+        yield from self._round_robin_generate([
             self._generate_property,
             self._generate_greater_than,
             self._generate_divisibility,
             self._generate_arithmetic,
             self._generate_more_factors,
             self._generate_shares_factor,
-        ]
-
-        # Round-robin across sub-generators so max_pairs doesn't starve later relations
-        iterators = [gen_fn() for gen_fn in sub_generators]
-        counts_by_relation: dict[str, int] = {fn.__name__: 0 for fn in sub_generators}
-        active = list(range(len(iterators)))
-
-        while active:
-            next_active = []
-            for idx in active:
-                try:
-                    pair = next(iterators[idx])
-                except StopIteration:
-                    continue
-                yield pair
-                count += 1
-                counts_by_relation[sub_generators[idx].__name__] += 1
-                next_active.append(idx)
-                if self.max_pairs is not None and count >= self.max_pairs:
-                    logger.info("Math generator pair counts: %s", counts_by_relation)
-                    return
-            active = next_active
-
-        logger.info(
-            "Math generator produced %d total pairs. Per relation: %s",
-            count, counts_by_relation,
-        )
+        ])
 
     # --- Template picking ---
 

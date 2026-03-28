@@ -183,39 +183,13 @@ class AnatomyGenerator(BaseGenerator):
     # --- Main generate ---
 
     def generate(self) -> Iterator[ContrastivePair]:
-        count = 0
-        generators = [
+        yield from self._round_robin_generate([
             self._generate_system_membership,
             self._generate_regional_containment,
             self._generate_structure_type,
             self._generate_same_region,
             self._generate_same_system,
-        ]
-        # Round-robin across sub-generators so max_pairs doesn't starve later relations
-        iterators = [gen_fn() for gen_fn in generators]
-        counts_by_relation: dict[str, int] = {fn.__name__: 0 for fn in generators}
-        active = list(range(len(iterators)))
-
-        while active:
-            next_active = []
-            for idx in active:
-                try:
-                    pair = next(iterators[idx])
-                except StopIteration:
-                    continue
-                yield pair
-                count += 1
-                counts_by_relation[generators[idx].__name__] += 1
-                next_active.append(idx)
-                if self.max_pairs is not None and count >= self.max_pairs:
-                    logger.info("Anatomy generator pair counts: %s", counts_by_relation)
-                    return
-            active = next_active
-
-        logger.info(
-            "Anatomy generator produced %d total pairs. Per relation: %s",
-            count, counts_by_relation,
-        )
+        ])
 
     # --- Helpers ---
 

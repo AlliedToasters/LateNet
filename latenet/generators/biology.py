@@ -267,19 +267,11 @@ class BiologyGenerator(BaseGenerator):
         if self._organisms is None or self._organisms.empty:
             return
 
-        count = 0
-        generators = [
+        yield from self._round_robin_generate([
             self._generate_membership,
             self._generate_sibling,
             self._generate_rank,
-        ]
-
-        for gen_fn in generators:
-            for pair in gen_fn():
-                yield pair
-                count += 1
-                if self.max_pairs is not None and count >= self.max_pairs:
-                    return
+        ])
 
     # --- Helpers ---
 

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import random
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 
 from latenet.types import ContrastivePair
+
+logger = logging.getLogger(__name__)
 
 
 class BaseGenerator(ABC):
@@ -37,6 +40,36 @@ class BaseGenerator(ABC):
     def name(self) -> str:
         """Short identifier for this generator (e.g. 'wordnet', 'geography')."""
         ...
+
+    # --- Round-robin generation -----------------------------------------------
+
+    def _round_robin_generate(
+        self,
+        sub_generators: list[Callable[[], Iterator[ContrastivePair]]],
+    ) -> Iterator[ContrastivePair]:
+        """Interleave pairs from multiple sub-generators.
+
+        Cycles through sub-generators one pair at a time so that max_pairs
+        doesn't starve later relation types.  Exhausted sub-generators are
+        dropped from the rotation.
+        """
+        iterators = [fn() for fn in sub_generators]
+        active = list(range(len(iterators)))
+        count = 0
+
+        while active:
+            next_active = []
+            for idx in active:
+                try:
+                    pair = next(iterators[idx])
+                except StopIteration:
+                    continue
+                yield pair
+                count += 1
+                next_active.append(idx)
+                if self.max_pairs is not None and count >= self.max_pairs:
+                    return
+            active = next_active
 
     # --- Sitelink-weighted sampling ------------------------------------------
     # Reusable across any generator whose entities have a notability signal
