@@ -15,10 +15,7 @@ _wd._wikistash_checked = True
 _wd._wikistash_stash = None
 
 from latenet.datasources.wikidata import (
-    CACHE_ROOT,
     _build_lineage,
-    _cache_key,
-    _cache_path,
     _extract_qid,
     _resolve_rank_label,
     filter_has_label,
@@ -70,17 +67,6 @@ class TestResolveRankLabel:
         assert _resolve_rank_label("http://www.wikidata.org/entity/Q99999") == "unknown"
 
 
-class TestCacheKey:
-    def test_deterministic(self):
-        q = "SELECT * WHERE { ?s ?p ?o }"
-        assert _cache_key(q) == _cache_key(q)
-
-    def test_different_queries_different_keys(self):
-        q1 = "SELECT * WHERE { ?s ?p ?o }"
-        q2 = "SELECT * WHERE { ?x ?y ?z }"
-        assert _cache_key(q1) != _cache_key(q2)
-
-
 class TestFilterHasWikipedia:
     def test_filters_empty_article(self):
         df = pd.DataFrame({
@@ -110,8 +96,8 @@ class TestFilterHasLabel:
 
 class TestSparqlQuery:
     @patch("latenet.datasources.wikidata.requests.get")
-    def test_basic_query(self, mock_get, tmp_path):
-        """Test that sparql_query parses JSON results correctly."""
+    def test_basic_query(self, mock_get):
+        """Test that sparql_query parses JSON results correctly (remote fallback)."""
         response_data = _fake_sparql_response([
             {"item": "http://www.wikidata.org/entity/Q144", "itemLabel": "dog"},
             {"item": "http://www.wikidata.org/entity/Q146", "itemLabel": "cat"},
@@ -123,36 +109,14 @@ class TestSparqlQuery:
         mock_get.return_value = mock_resp
 
         query = "SELECT ?item ?itemLabel WHERE { ?item wdt:P31 wd:Q16521 } LIMIT 2"
-
-        with patch("latenet.datasources.wikidata.CACHE_ROOT", tmp_path):
-            with patch("latenet.datasources.wikidata._cache_path") as mock_cp:
-                cache_file = tmp_path / "test.parquet"
-                mock_cp.return_value = cache_file
-
-                df = sparql_query(query, force_refresh=True)
+        df = sparql_query(query)
 
         assert len(df) == 2
         assert "item" in df.columns
         assert df.iloc[0]["itemLabel"] == "dog"
 
     @patch("latenet.datasources.wikidata.requests.get")
-    def test_cache_hit(self, mock_get, tmp_path):
-        """Test that cached results are returned without making a request."""
-        cache_file = tmp_path / "cached.parquet"
-        cached_df = pd.DataFrame({"item": ["Q1"], "label": ["Universe"]})
-        cached_df.to_parquet(cache_file, index=False)
-
-        query = "SELECT * WHERE { wd:Q1 ?p ?o }"
-
-        with patch("latenet.datasources.wikidata._cache_path", return_value=cache_file):
-            df = sparql_query(query, force_refresh=False)
-
-        mock_get.assert_not_called()
-        assert len(df) == 1
-        assert df.iloc[0]["label"] == "Universe"
-
-    @patch("latenet.datasources.wikidata.requests.get")
-    def test_retries_on_failure(self, mock_get, tmp_path):
+    def test_retries_on_failure(self, mock_get):
         """Test that transient failures are retried."""
         import requests as real_requests
 
@@ -166,12 +130,7 @@ class TestSparqlQuery:
         ]
 
         query = "SELECT ?x WHERE { ?x ?y ?z } LIMIT 1"
-
-        with patch("latenet.datasources.wikidata.CACHE_ROOT", tmp_path):
-            with patch("latenet.datasources.wikidata._cache_path") as mock_cp:
-                mock_cp.return_value = tmp_path / "retry_test.parquet"
-                with patch("latenet.datasources.wikidata._ensure_cache_dir", return_value=tmp_path):
-                    df = sparql_query(query, force_refresh=True)
+        df = sparql_query(query)
 
         assert len(df) == 1
         assert mock_get.call_count == 3

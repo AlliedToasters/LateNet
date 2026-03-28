@@ -60,9 +60,9 @@ _SIBLING_TEMPLATES = [
 # Taxonomic rank ordering
 _RANK_TEMPLATES = [
     BioTemplate("bio_rank_01", "has_rank",
-                 "{rankA} is a lower rank than {rankB}."),
+                 "{rankA} is a more specific rank than {rankB}."),
     BioTemplate("bio_rank_02", "has_rank",
-                 "{rankA} is a higher rank than {rankB}."),
+                 "{rankA} is a more general rank than {rankB}."),
     BioTemplate("bio_rank_03", "has_rank",
                  "In taxonomy, {rankA} is a higher level than {rankB}."),
 ]

@@ -30,7 +30,7 @@ def _mock_elements() -> pd.DataFrame:
             "is_radioactive": 0,
             "melting_point": 0.95, "boiling_point": 4.22,
             "state_rt": "gas",
-            "_series_name": "Noble gases", "series_label": "noble gase",
+            "_series_name": "Noble gases", "series_label": "noble gas",
         },
         {
             "atomic_number": 11, "symbol": "Na", "name": "Sodium",

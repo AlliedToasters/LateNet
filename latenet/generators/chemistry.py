@@ -220,11 +220,18 @@ class ChemistryGenerator(BaseGenerator):
 
         # Make series name lowercase for natural-sounding templates
         # e.g. "Alkali metals" -> "alkali metal" (singular for templates like "X is a ...")
-        elements_df["series_label"] = elements_df["_series_name"].apply(
-            lambda s: s.lower().rstrip("s") if pd.notna(s) and s.lower().endswith("s") else (
-                s.lower() if pd.notna(s) else None
-            )
-        )
+        def _singularize_series(s):
+            if not pd.notna(s):
+                return None
+            low = s.lower()
+            if low.endswith("ses"):
+                # "Noble gases" → "noble gas", not "noble gase"
+                return low[:-2]
+            if low.endswith("s"):
+                return low[:-1]
+            return low
+
+        elements_df["series_label"] = elements_df["_series_name"].apply(_singularize_series)
 
         self._elements = elements_df
         logger.info(

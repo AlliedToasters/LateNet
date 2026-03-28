@@ -79,18 +79,36 @@ def _cousins_of(synset: Synset) -> list[Synset]:
     return cousins
 
 
+def _is_category_level(synset: Synset) -> bool:
+    """True if synset is a general category (has hyponyms and attested lemmas).
+
+    Filters out leaf synsets like 'Sioux.n.01' or 'sixteen.n.01' that produce
+    nonsensical false statements when used as categories in "X is a Y" templates.
+    """
+    return len(synset.hyponyms()) >= 2 and _max_lemma_count(synset) > 0
+
+
 def _distant_synset(synset: Synset, rng: random.Random) -> Synset | None:
-    """Pick a noun synset from a different root hypernym tree, weighted by frequency."""
+    """Pick a noun synset from a different root hypernym tree, weighted by frequency.
+
+    Only considers category-level synsets (have hyponyms, attested in corpus) to
+    avoid nonsensical false statements like 'Day is a Sioux'.
+    """
     source_roots = {r.name() for r in synset.root_hypernyms()}
     by_root = _synsets_by_root()
 
     other_roots = [k for k in by_root if k not in source_roots]
     if not other_roots:
-        all_synsets = [s for ss in by_root.values() for s in ss if s.name() != synset.name()]
+        all_synsets = [s for ss in by_root.values() for s in ss
+                       if s.name() != synset.name() and _is_category_level(s)]
         return _frequency_weighted_choice(all_synsets, rng) if all_synsets else None
 
     root = rng.choice(other_roots)
-    return _frequency_weighted_choice(by_root[root], rng)
+    pool = [s for s in by_root[root] if _is_category_level(s)]
+    if not pool:
+        # Fallback: relax to just attested synsets
+        pool = [s for s in by_root[root] if _max_lemma_count(s) > 0]
+    return _frequency_weighted_choice(pool, rng) if pool else None
 
 
 def pick_negation_synset(

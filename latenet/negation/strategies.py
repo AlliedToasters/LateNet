@@ -103,10 +103,10 @@ def negate_statement(statement: str) -> str:
     s = re.sub(r"\bis a component of\b", "is not a component of", s, count=1)
     if s != original:
         return s
-    s = re.sub(r"\bis a lower rank\b", "is not a lower rank", s, count=1)
+    s = re.sub(r"\bis a more specific rank\b", "is not a more specific rank", s, count=1)
     if s != original:
         return s
-    s = re.sub(r"\bis a higher rank\b", "is not a higher rank", s, count=1)
+    s = re.sub(r"\bis a more general rank\b", "is not a more general rank", s, count=1)
     if s != original:
         return s
     s = re.sub(r"\bis a higher level\b", "is not a higher level", s, count=1)
