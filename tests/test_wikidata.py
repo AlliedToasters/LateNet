@@ -9,6 +9,11 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+# Disable wikistash for all tests so mocked HTTP tests work correctly
+import latenet.datasources.wikidata as _wd
+_wd._wikistash_checked = True
+_wd._wikistash_stash = None
+
 from latenet.datasources.wikidata import (
     CACHE_ROOT,
     _build_lineage,

@@ -167,14 +167,10 @@ def sparql_query(
         logger.info("Cache hit for query %s", _cache_key(query)[:12])
         return pd.read_parquet(cp)
 
-    # Try wikistash first (local, fast, no rate limits)
+    # Try wikistash first (local, fast, no rate limits — skip cache)
     local_result = _run_wikistash_query(query)
     if local_result is not None:
         logger.info("wikistash returned %d rows for query %s", len(local_result), _cache_key(query)[:12])
-        # Cache the result same as remote
-        _ensure_cache_dir()
-        local_result.to_parquet(cp, index=False)
-        _update_manifest(query, len(local_result))
         return local_result
 
     logger.debug("SPARQL query:\n%s", query)
@@ -255,16 +251,13 @@ def sparql_query_paginated(
         logger.info("Cache hit for paginated query %s", _cache_key(query_template)[:12])
         return pd.read_parquet(cp)
 
-    # Try wikistash — run full query without pagination (local is fast enough)
+    # Try wikistash — run full query without pagination (local is fast enough, skip cache)
     # Fill in a large LIMIT and OFFSET=0 to satisfy the template placeholders
     local_query = query_template.format(limit=1_000_000, offset=0)
     local_result = _run_wikistash_query(local_query)
     if local_result is not None:
         logger.info("wikistash returned %d rows for paginated query %s",
                      len(local_result), _cache_key(query_template)[:12])
-        _ensure_cache_dir()
-        local_result.to_parquet(cp, index=False)
-        _update_manifest(query_template, len(local_result))
         return local_result
 
     logger.info("Starting paginated query %s...", _cache_key(query_template)[:12])
