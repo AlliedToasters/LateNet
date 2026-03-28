@@ -154,6 +154,7 @@ class BiologyGenerator(BaseGenerator):
         self._family_groups: dict[str, list[int]] | None = None
         self._order_groups: dict[str, list[int]] | None = None
         self._class_groups: dict[str, list[int]] | None = None
+        self._sample_weights: list[float] | None = None  # sitelink-proportional
 
     @property
     def name(self) -> str:
@@ -186,8 +187,8 @@ class BiologyGenerator(BaseGenerator):
         # Filter to species only for pair generation
         species = df[df["taxon_rank"] == "species"].copy()
 
-        # Require key lineage fields
-        species = species.dropna(subset=["kingdom"]).copy()
+        # Require at least family-level lineage (the minimum for generation)
+        species = species.dropna(subset=["family"]).copy()
 
         # Use common_name as the display name, lowercase for natural language
         species["display_name"] = species["common_name"].str.lower()
@@ -205,12 +206,29 @@ class BiologyGenerator(BaseGenerator):
         self._family_groups = self._build_groups(self._organisms, "family")
         self._order_groups = self._build_groups(self._organisms, "order")
         self._class_groups = self._build_groups(self._organisms, "class_")
+
+        # Build sitelink-proportional sampling weights.
+        # Use sitelinks as a proxy for notability — organisms with more
+        # Wikipedia articles across languages are more recognizable to LLMs.
+        sitelinks = self._organisms.get("sitelinks", pd.Series(0, index=self._organisms.index))
+        sitelinks = pd.to_numeric(sitelinks, errors="coerce").fillna(0).clip(lower=1)
+        total = sitelinks.sum()
+        self._sample_weights = (sitelinks / total).tolist()
+
+        # Log distribution stats
+        median_sl = sitelinks.median()
+        p90_sl = sitelinks.quantile(0.9)
+        p99_sl = sitelinks.quantile(0.99)
         logger.info(
             "Biology data loaded: %d species, %d families, %d orders, %d classes",
             len(self._organisms),
             len(self._family_groups),
             len(self._order_groups),
             len(self._class_groups),
+        )
+        logger.info(
+            "Sitelink distribution: median=%.0f, p90=%.0f, p99=%.0f",
+            median_sl, p90_sl, p99_sl,
         )
 
         # Log order-level family density for medium-tier viability
@@ -277,13 +295,66 @@ class BiologyGenerator(BaseGenerator):
     def _organism_row(self, idx: int) -> pd.Series:
         return self._organisms.loc[idx]
 
+    def _ensure_weights(self) -> None:
+        """Ensure sampling weights are initialized (for test fixtures that bypass _load_data)."""
+        if self._sample_weights is not None:
+            return
+        n = len(self._organisms)
+        if "sitelinks" in self._organisms.columns:
+            sitelinks = pd.to_numeric(self._organisms["sitelinks"], errors="coerce").fillna(0).clip(lower=1)
+            total = sitelinks.sum()
+            self._sample_weights = (sitelinks / total).tolist()
+        else:
+            # Uniform weights when sitelinks not available
+            self._sample_weights = [1.0 / n] * n
+
+    def _weighted_sample_indices(self, n: int) -> list[int]:
+        """Sample n unique organism indices with probability proportional to sitelinks."""
+        self._ensure_weights()
+        indices = list(self._organisms.index)
+        weights = self._sample_weights
+        sampled = []
+        seen: set[int] = set()
+        while len(sampled) < n and len(seen) < len(indices):
+            batch = self.rng.choices(indices, weights=weights, k=min(n * 2, len(indices)))
+            for idx in batch:
+                if idx not in seen:
+                    seen.add(idx)
+                    sampled.append(idx)
+                    if len(sampled) >= n:
+                        break
+        return sampled
+
+    def _weighted_pick(self, candidate_indices: list[int], k: int = 1) -> list[int]:
+        """Pick k unique indices from candidates, weighted by sitelinks."""
+        if not candidate_indices or k <= 0:
+            return []
+        self._ensure_weights()
+        weights = [self._sample_weights[i] for i in candidate_indices]
+        total = sum(weights)
+        if total == 0:
+            return self.rng.sample(candidate_indices, min(k, len(candidate_indices)))
+        weights = [w / total for w in weights]
+        picked = []
+        seen: set[int] = set()
+        while len(picked) < k and len(seen) < len(candidate_indices):
+            batch = self.rng.choices(candidate_indices, weights=weights, k=min(k * 2, len(candidate_indices)))
+            for idx in batch:
+                if idx not in seen:
+                    seen.add(idx)
+                    picked.append(idx)
+                    if len(picked) >= k:
+                        break
+        return picked
+
     # --- Taxonomic membership ---
 
     def _generate_membership(self) -> Iterator[ContrastivePair]:
         """Generate '{organism} is a {taxon}' pairs."""
         organisms = self._organisms
-        indices = list(organisms.index)
-        self.rng.shuffle(indices)
+        # Sample organisms with probability proportional to sitelinks
+        # so well-known species appear more often than obscure ones.
+        indices = self._weighted_sample_indices(len(organisms))
 
         # Ranks to generate membership statements for (skip species — it's the organism itself).
         # Restrict to family and order only. The 2021 ICNP bacterial reclassification
@@ -438,10 +509,11 @@ class BiologyGenerator(BaseGenerator):
                 if len(member_indices) < 2:
                     continue
 
-                # Pick a true pair (same group)
-                pair_indices = list(member_indices)
-                self.rng.shuffle(pair_indices)
-                idx_a, idx_b = pair_indices[0], pair_indices[1]
+                # Pick a true pair (same group), weighted by sitelinks
+                picked = self._weighted_pick(member_indices, k=2)
+                if len(picked) < 2:
+                    continue
+                idx_a, idx_b = picked[0], picked[1]
 
                 name_a = self._organism_name(idx_a)
                 name_b = self._organism_name(idx_b)
@@ -452,13 +524,14 @@ class BiologyGenerator(BaseGenerator):
                     rank=_RANK_DISPLAY.get(rank_label, rank_label),
                 )
 
-                # False: pick an organism NOT in this group
+                # False: pick an organism NOT in this group, weighted
+                member_set = set(member_indices)
                 other_indices = [
-                    i for i in organisms.index if i not in member_indices
+                    i for i in organisms.index if i not in member_set
                 ]
                 if not other_indices:
                     continue
-                idx_c = self.rng.choice(other_indices)
+                idx_c = self._weighted_pick(other_indices, k=1)[0]
                 name_c = self._organism_name(idx_c)
 
                 false_stmt = render_template(template.pattern,

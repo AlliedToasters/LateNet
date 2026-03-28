@@ -402,6 +402,48 @@ _RANK_QIDS = {
     "kingdom": "Q36732",
 }
 
+# Intermediate ranks that sit between the canonical ranks above.
+# These are loaded as "bridge" entities so the lineage walker can chain
+# through them (e.g., Panthera → Pantherinae [subfamily] → Felidae).
+# They don't get their own lineage columns — they just need to exist
+# in qid_to_parent so the walk doesn't dead-end.
+# QIDs verified against Wikidata 2026-03 dump.
+_BRIDGE_RANK_QIDS = {
+    # Between species and genus
+    "subgenus": "Q3238261",       # 13,797 entities
+    # Between genus and family
+    "section": "Q10861426",       #  7,417
+    "series": "Q3025161",         #  1,804
+    "subsection": "Q5998839",     #  1,563
+    "tribe": "Q227936",           #  8,425
+    "subtribe": "Q3965313",       #  2,629
+    "supertribe": "Q14817220",    #     63
+    "subfamily": "Q164280",       #  9,502
+    # Between family and order
+    "superfamily": "Q2136103",    #  1,953
+    # Between order and class
+    "suborder": "Q5867959",       #  1,136
+    "infraorder": "Q2889003",     #    331
+    "parvorder": "Q6311258",      #     57
+    "mirorder": "Q7506274",       #      8
+    "grandorder": "Q6462265",     #      7
+    "magnorder": "Q6054237",      #      7
+    "superorder": "Q5868144",     #    304
+    "cohort": "Q2981883",         #     16
+    # Between class and phylum
+    "subclass": "Q5867051",       #    412
+    "infraclass": "Q2007442",     #     50
+    "superclass": "Q3504061",     #     38
+    # Between phylum and kingdom
+    "subphylum": "Q1153785",      #     95
+    "infraphylum": "Q2361851",    #     21
+    "superphylum": "Q2111790",    #     27
+    "division": "Q334460",        #     77  (botanical phylum equivalent)
+    # Between kingdom and root
+    "subkingdom": "Q2752679",     #     40
+    "infrakingdom": "Q3150876",   #     17
+}
+
 # Ordered from most specific to most general
 RANK_ORDER = ["species", "genus", "family", "order", "class", "phylum", "kingdom"]
 RANK_LEVEL = {r: i for i, r in enumerate(RANK_ORDER)}
@@ -412,19 +454,19 @@ def _build_organism_query_for_rank(rank_qid: str, min_sitelinks: int = 0) -> str
 
     Uses rdfs:label directly instead of SERVICE wikibase:label, which is
     dramatically faster for large result sets like species (~1.6M taxa).
+    Always returns sitelink counts for popularity-weighted sampling.
     """
     sitelink_clause = ""
     if min_sitelinks > 0:
-        sitelink_clause = f"""
-  ?item wikibase:sitelinks ?sitelinks .
-  FILTER(?sitelinks >= {min_sitelinks})"""
+        sitelink_clause = f"\n  FILTER(?sitelinks >= {min_sitelinks})"
 
     return f"""
-SELECT ?item ?itemLabel ?parentTaxon ?parentTaxonLabel
+SELECT ?item ?itemLabel ?parentTaxon ?parentTaxonLabel ?sitelinks
 WHERE {{{{
   ?item wdt:P31 wd:Q16521 ;
         wdt:P105 wd:{rank_qid} ;
         wdt:P171 ?parentTaxon ;
+        wikibase:sitelinks ?sitelinks ;
         rdfs:label ?itemLabel .
   ?parentTaxon rdfs:label ?parentTaxonLabel .
   FILTER(LANG(?itemLabel) = "en")
@@ -436,6 +478,8 @@ LIMIT {{limit}} OFFSET {{offset}}
 
 def _extract_qid(uri: str) -> str:
     """Extract QID from a Wikidata entity URI."""
+    if not isinstance(uri, str):
+        return ""
     if "/" in uri:
         return uri.rsplit("/", 1)[-1]
     return uri
@@ -533,8 +577,16 @@ def load_organisms(
     """
     all_dfs: list[pd.DataFrame] = []
 
-    for rank_label, rank_qid in _RANK_QIDS.items():
-        query_template = _build_organism_query_for_rank(rank_qid, min_sitelinks=min_sitelinks)
+    # Query canonical ranks (species, genus, family, ...) AND bridge ranks
+    # (subfamily, superfamily, tribe, ...). Bridge ranks don't get lineage
+    # columns but their presence in the DataFrame lets the lineage walker
+    # chain through intermediate taxonomy nodes.
+    all_ranks = {**_RANK_QIDS, **_BRIDGE_RANK_QIDS}
+
+    for rank_label, rank_qid in all_ranks.items():
+        # Bridge ranks don't need sitelink filtering — they're structural
+        sitelinks = min_sitelinks if rank_label in _RANK_QIDS else 0
+        query_template = _build_organism_query_for_rank(rank_qid, min_sitelinks=sitelinks)
         try:
             raw = sparql_query_paginated(
                 query_template, page_size=2000, force_refresh=force_refresh,
@@ -554,6 +606,7 @@ def load_organisms(
         chunk["taxon_rank"] = rank_label
         chunk["parent_taxon_qid"] = raw.get("parentTaxon", pd.Series(dtype=str)).apply(_extract_qid)
         chunk["parent_taxon_label"] = raw.get("parentTaxonLabel", pd.Series(dtype=str))
+        chunk["sitelinks"] = pd.to_numeric(raw.get("sitelinks", pd.Series(dtype=float)), errors="coerce").fillna(0).astype(int)
         chunk["ncbi_taxon_id"] = ""
         chunk["article"] = ""
         chunk["has_wikipedia"] = False

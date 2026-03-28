@@ -240,3 +240,40 @@ class TestBuildLineage:
         org_row = result[result["qid"] == "Q1"].iloc[0]
         assert org_row["family"] == "fam"
         assert pd.isna(org_row["genus"]) or org_row["genus"] is None
+
+    def test_chains_through_bridge_ranks(self):
+        """Test that intermediate ranks (subfamily, etc.) bridge the lineage chain.
+
+        Simulates the real-world case: lion (species) → Panthera (genus) →
+        Pantherinae (subfamily) → Felidae (family). The subfamily is not a
+        canonical rank so it shouldn't get a lineage column, but the walker
+        must chain through it to reach Felidae.
+        """
+        df = pd.DataFrame([
+            {
+                "qid": "Q140", "name": "lion", "common_name": "lion",
+                "taxon_rank": "species", "parent_taxon_qid": "Q127960",
+            },
+            {
+                "qid": "Q127960", "name": "Panthera", "common_name": "Panthera",
+                "taxon_rank": "genus", "parent_taxon_qid": "Q230177",
+            },
+            {
+                "qid": "Q230177", "name": "Pantherinae", "common_name": "Pantherinae",
+                "taxon_rank": "subfamily", "parent_taxon_qid": "Q25265",
+            },
+            {
+                "qid": "Q25265", "name": "Felidae", "common_name": "cat",
+                "taxon_rank": "family", "parent_taxon_qid": "Q27070",
+            },
+            {
+                "qid": "Q27070", "name": "Carnivora", "common_name": "Carnivora",
+                "taxon_rank": "order", "parent_taxon_qid": None,
+            },
+        ])
+
+        result = _build_lineage(df)
+        lion = result[result["qid"] == "Q140"].iloc[0]
+        assert lion["genus"] == "Panthera"
+        assert lion["family"] == "cat"  # chains through subfamily bridge
+        assert lion["order"] == "Carnivora"
