@@ -101,11 +101,17 @@ def load_dictionary(
     else:
         logger.info("Cache hit: %s", cache_path)
 
-    # Parse TSV: two columns, no header
+    # Parse dictionary file: MUSE files use either tab or space as delimiter.
+    # Try tab first; if that produces only 1 column, fall back to space.
     df = pd.read_csv(
         cache_path, sep="\t", header=None, names=["source_word", "target_word"],
         dtype=str, na_filter=False,
     )
+    if "target_word" not in df.columns or df["target_word"].isna().all() or (df["target_word"] == "").all():
+        df = pd.read_csv(
+            cache_path, sep=" ", header=None, names=["source_word", "target_word"],
+            dtype=str, na_filter=False, usecols=[0, 1],
+        )
     initial_count = len(df)
 
     # Filter: single-word only (no spaces in either column)
