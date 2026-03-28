@@ -233,16 +233,27 @@ class TemporalGenerator(BaseGenerator):
             return 0.5
         return 0.25
 
-    def _weighted_sample(self, df: pd.DataFrame, year_col: str) -> list[int]:
-        """Return index list with entries repeated by recency weight."""
-        indices = []
-        for idx in df.index:
-            year = int(df.loc[idx, year_col])
-            w = self._recency_weight(year)
-            # Weight 1.0 -> 4 copies, 0.5 -> 2, 0.25 -> 1
-            copies = max(1, int(w * 4))
-            indices.extend([idx] * copies)
-        return indices
+    def _notability_weights(self, df: pd.DataFrame, year_col: str) -> list[float]:
+        """Build combined sitelink × recency weights for a DataFrame.
+
+        Uses sitelinks as the primary notability signal (if available),
+        multiplied by the recency weight to favour well-documented eras.
+        Falls back to recency-only when sitelinks are absent.
+        """
+        if "sitelinks" in df.columns:
+            sitelinks = pd.to_numeric(df["sitelinks"], errors="coerce").fillna(0).tolist()
+        else:
+            sitelinks = [1.0] * len(df)
+
+        raw = [
+            max(sl, 1.0) * self._recency_weight(int(df.loc[idx, year_col]))
+            for idx, sl in zip(df.index, sitelinks)
+        ]
+        total = sum(raw)
+        if total == 0:
+            n = len(raw)
+            return [1.0 / n] * n
+        return [v / total for v in raw]
 
     def _pick_template(self, relation: str) -> TempTemplate:
         templates = _ALL_TEMPLATES[relation]
@@ -256,16 +267,16 @@ class TemporalGenerator(BaseGenerator):
             return
 
         events = self._events
-        indices = self._weighted_sample(events, "year")
-        self.rng.shuffle(indices)
+        indices = list(events.index)
+        weights = self._notability_weights(events, "year")
 
         # Sample pairs rather than generating all O(n^2) combinations
         max_attempts = min(len(indices) * 5, 10000)
         seen = set()
 
         for _ in range(max_attempts):
-            idx_a = self.rng.choice(indices)
-            idx_b = self.rng.choice(indices)
+            idx_a = self.rng.choices(indices, weights=weights, k=1)[0]
+            idx_b = self.rng.choices(indices, weights=weights, k=1)[0]
             if idx_a == idx_b:
                 continue
 
@@ -331,15 +342,15 @@ class TemporalGenerator(BaseGenerator):
             return
 
         people = self._people
-        indices = self._weighted_sample(people, "birth_year")
-        self.rng.shuffle(indices)
+        indices = list(people.index)
+        weights = self._notability_weights(people, "birth_year")
 
         max_attempts = min(len(indices) * 5, 10000)
         seen = set()
 
         for _ in range(max_attempts):
-            idx_a = self.rng.choice(indices)
-            idx_b = self.rng.choice(indices)
+            idx_a = self.rng.choices(indices, weights=weights, k=1)[0]
+            idx_b = self.rng.choices(indices, weights=weights, k=1)[0]
             if idx_a == idx_b:
                 continue
 
@@ -422,8 +433,8 @@ class TemporalGenerator(BaseGenerator):
         if df.empty:
             return
 
-        indices = list(df.index)
-        self.rng.shuffle(indices)
+        weights = self._notability_weights(df, year_col)
+        indices = self.weighted_sample(list(df.index), weights, len(df))
 
         # Collect distinct centuries for swap selection
         all_centuries = sorted(df[year_col].apply(_year_to_century).unique())
@@ -519,14 +530,15 @@ class TemporalGenerator(BaseGenerator):
 
         p_indices = list(people_with_death.index)
         e_indices = list(events.index)
-        self.rng.shuffle(p_indices)
+        p_weights = self._notability_weights(people_with_death, "birth_year")
+        e_weights = self._notability_weights(events, "year")
 
         max_attempts = min(len(p_indices) * 5, 10000)
         seen = set()
 
         for _ in range(max_attempts):
-            p_idx = self.rng.choice(p_indices)
-            e_idx = self.rng.choice(e_indices)
+            p_idx = self.rng.choices(p_indices, weights=p_weights, k=1)[0]
+            e_idx = self.rng.choices(e_indices, weights=e_weights, k=1)[0]
 
             pair_key = (p_idx, e_idx)
             if pair_key in seen:
@@ -610,14 +622,14 @@ class TemporalGenerator(BaseGenerator):
             return
 
         indices = list(people.index)
-        self.rng.shuffle(indices)
+        weights = self._notability_weights(people, "birth_year")
 
         max_attempts = min(len(indices) * 5, 10000)
         seen = set()
 
         for _ in range(max_attempts):
-            idx_a = self.rng.choice(indices)
-            idx_b = self.rng.choice(indices)
+            idx_a = self.rng.choices(indices, weights=weights, k=1)[0]
+            idx_b = self.rng.choices(indices, weights=weights, k=1)[0]
             if idx_a == idx_b:
                 continue
 
@@ -647,7 +659,7 @@ class TemporalGenerator(BaseGenerator):
                 true_stmt = render_template(template.pattern,personA=name_a, personB=name_b)
 
                 # Find a non-contemporary for false statement
-                non_contemp = self._find_non_contemporary(people, row_a, indices)
+                non_contemp = self._find_non_contemporary(people, row_a, indices, weights)
                 if non_contemp is None:
                     continue
 
@@ -683,14 +695,18 @@ class TemporalGenerator(BaseGenerator):
 
     def _find_non_contemporary(
         self, people: pd.DataFrame, person: pd.Series, indices: list[int],
+        weights: list[float] | None = None,
     ) -> pd.Series | None:
         """Find a person whose lifespan doesn't overlap with the given person."""
         death = int(person["death_year"])
         birth = int(person["birth_year"])
 
-        # Try random candidates
+        # Try random candidates (weighted if available)
         for _ in range(50):
-            idx = self.rng.choice(indices)
+            if weights:
+                idx = self.rng.choices(indices, weights=weights, k=1)[0]
+            else:
+                idx = self.rng.choice(indices)
             candidate = people.loc[idx]
             c_birth = int(candidate["birth_year"])
             c_death = int(candidate["death_year"])

@@ -128,6 +128,7 @@ class AuthorshipGenerator(BaseGenerator):
         self._data: pd.DataFrame | None = None
         self._domain_groups: dict[str, pd.DataFrame] | None = None
         self._author_works: dict[str, list[int]] | None = None
+        self._row_weights: list[float] | None = None
 
     @property
     def name(self) -> str:
@@ -163,6 +164,13 @@ class AuthorshipGenerator(BaseGenerator):
         df["era"] = df["publication_year"].apply(_era_from_year)
 
         self._data = df
+
+        # Build author-sitelink-based sampling weights for each row
+        if "author_sitelinks" in df.columns:
+            sl = pd.to_numeric(df["author_sitelinks"], errors="coerce").fillna(0)
+            self._row_weights = self.build_weights(sl.tolist())
+        else:
+            self._row_weights = self.build_weights([1.0] * len(df))
 
         # Group by creative domain
         self._domain_groups = {
@@ -265,6 +273,17 @@ class AuthorshipGenerator(BaseGenerator):
         idx = self.rng.randint(0, len(unique_authors) - 1)
         return unique_authors.iloc[idx]
 
+    def _ensure_weights(self) -> None:
+        """Ensure row weights are initialized (for test fixtures that bypass _load_data)."""
+        if self._row_weights is not None:
+            return
+        if self._data is not None and "author_sitelinks" in self._data.columns:
+            sl = pd.to_numeric(self._data["author_sitelinks"], errors="coerce").fillna(0)
+            self._row_weights = self.build_weights(sl.tolist())
+        elif self._data is not None:
+            n = len(self._data)
+            self._row_weights = self.build_weights([1.0] * n)
+
     # --- created_by ---
 
     def _generate_created_by(self) -> Iterator[ContrastivePair]:
@@ -273,8 +292,9 @@ class AuthorshipGenerator(BaseGenerator):
             return
 
         df = self._data
-        indices = list(df.index)
-        self.rng.shuffle(indices)
+        # Weighted sampling: prefer rows with more notable authors
+        self._ensure_weights()
+        indices = self.weighted_sample(list(df.index), self._row_weights, len(df))
 
         per_domain_counts: dict[str, int] = {}
         seen_pair_ids: set[str] = set()
@@ -376,8 +396,21 @@ class AuthorshipGenerator(BaseGenerator):
         df = self._data
 
         # For each author, pick one of their works, then swap with another author's work
+        # Weight author selection by max sitelinks among their works
         authors = list(self._author_works.keys())
-        self.rng.shuffle(authors)
+        if "author_sitelinks" in df.columns:
+            author_sl = []
+            for aqid in authors:
+                widx = self._author_works[aqid]
+                max_sl = df.loc[widx, "author_sitelinks"].max()
+                author_sl.append(float(max_sl) if pd.notna(max_sl) else 1.0)
+            author_weights = self.build_weights(author_sl)
+            authors = self.weighted_sample(
+                list(range(len(authors))), author_weights, len(authors)
+            )
+            authors = [list(self._author_works.keys())[i] for i in authors]
+        else:
+            self.rng.shuffle(authors)
 
         for author_qid in authors:
             work_indices = self._author_works[author_qid]
@@ -453,18 +486,22 @@ class AuthorshipGenerator(BaseGenerator):
         df = self._data
 
         # Derive each author's primary role from their works' domain
-        author_roles = (
-            df.groupby("author_qid")
-            .agg(
-                author_name=("author_name", "first"),
-                role=("role", "first"),
-                creative_domain=("creative_domain", "first"),
-            )
-            .reset_index()
-        )
+        agg_dict = {
+            "author_name": ("author_name", "first"),
+            "role": ("role", "first"),
+            "creative_domain": ("creative_domain", "first"),
+        }
+        if "author_sitelinks" in df.columns:
+            agg_dict["author_sitelinks"] = ("author_sitelinks", "max")
+        author_roles = df.groupby("author_qid").agg(**agg_dict).reset_index()
 
-        indices = list(author_roles.index)
-        self.rng.shuffle(indices)
+        if "author_sitelinks" in author_roles.columns:
+            sl = pd.to_numeric(author_roles["author_sitelinks"], errors="coerce").fillna(0)
+            ar_weights = self.build_weights(sl.tolist())
+            indices = self.weighted_sample(list(author_roles.index), ar_weights, len(author_roles))
+        else:
+            indices = list(author_roles.index)
+            self.rng.shuffle(indices)
 
         available_roles = sorted(set(author_roles["role"].unique()))
         if len(available_roles) < 2:

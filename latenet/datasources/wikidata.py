@@ -674,20 +674,19 @@ def _build_event_query(
     """
     included = {qid for qid in _EVENT_TYPES if qid not in exclude_event_types}
     values_block = "\n    ".join(f"wd:{qid}  # {_EVENT_TYPES[qid]}" for qid in sorted(included))
-    sitelink_clause = ""
+    sitelink_filter = ""
     if min_sitelinks > 0:
-        sitelink_clause = f"""
-  ?item wikibase:sitelinks ?sitelinks .
-  FILTER(?sitelinks >= {min_sitelinks})"""
+        sitelink_filter = f"\n  FILTER(?sitelinks >= {min_sitelinks})"
 
     return f"""
-SELECT DISTINCT ?item ?itemLabel ?itemDescription ?date ?eventType ?eventTypeLabel ?article
+SELECT DISTINCT ?item ?itemLabel ?itemDescription ?date ?eventType ?eventTypeLabel ?article ?sitelinks
 WHERE {{{{
   VALUES ?eventType {{{{
     {values_block}
   }}}}
   ?item wdt:P31 ?eventType .
-  ?item wdt:P585 ?date .{sitelink_clause}
+  ?item wdt:P585 ?date .
+  ?item wikibase:sitelinks ?sitelinks .{sitelink_filter}
 
   OPTIONAL {{{{
     ?article schema:about ?item .
@@ -722,17 +721,16 @@ def _build_people_query_for_occupation(
 
     Querying one occupation at a time avoids Wikidata query planner timeouts.
     """
-    sitelink_clause = ""
+    sitelink_filter = ""
     if min_sitelinks > 0:
-        sitelink_clause = f"""
-  ?item wikibase:sitelinks ?sitelinks .
-  FILTER(?sitelinks >= {min_sitelinks})"""
+        sitelink_filter = f"\n  FILTER(?sitelinks >= {min_sitelinks})"
 
     return f"""
-SELECT ?item ?itemLabel ?birthDate ?deathDate
+SELECT ?item ?itemLabel ?birthDate ?deathDate ?sitelinks
 WHERE {{{{
   ?item wdt:P106 wd:{occupation_qid} ;
-        wdt:P569 ?birthDate .{sitelink_clause}
+        wdt:P569 ?birthDate ;
+        wikibase:sitelinks ?sitelinks .{sitelink_filter}
   OPTIONAL {{{{ ?item wdt:P570 ?deathDate . }}}}
   SERVICE wikibase:label {{{{ bd:serviceParam wikibase:language "en" . }}}}
 }}}}
@@ -838,6 +836,7 @@ def load_historical_events(
     df["event_type"] = raw.get("eventTypeLabel", pd.Series(dtype=str))
     df["article"] = raw.get("article", pd.Series(dtype=str))
     df["has_wikipedia"] = df["article"].notna() & (df["article"] != "")
+    df["sitelinks"] = pd.to_numeric(raw.get("sitelinks", pd.Series(dtype=float)), errors="coerce").fillna(0).astype(int)
 
     # Parse year
     df["year"] = df["date"].apply(_parse_year)
@@ -912,6 +911,7 @@ def load_notable_people(
         chunk["birth_date"] = raw.get("birthDate", pd.Series(dtype=str))
         chunk["death_date"] = raw.get("deathDate", pd.Series(dtype=str))
         chunk["occupation"] = occ_label
+        chunk["sitelinks"] = pd.to_numeric(raw.get("sitelinks", pd.Series(dtype=float)), errors="coerce").fillna(0).astype(int)
         all_dfs.append(chunk)
         logger.info("  %s: %d raw rows", occ_label, len(chunk))
 
@@ -1030,28 +1030,26 @@ def _build_author_work_query(
     and filters to works with exactly one creator.
     """
     values_block = " ".join(f"wd:{qid}" for qid in work_type_qids)
-    sitelink_clauses = ""
+    sitelink_filters = ""
     if min_work_sitelinks > 0:
-        sitelink_clauses += f"""
-  ?work wikibase:sitelinks ?workSitelinks .
-  FILTER(?workSitelinks >= {min_work_sitelinks})"""
+        sitelink_filters += f"\n  FILTER(?workSitelinks >= {min_work_sitelinks})"
     if min_author_sitelinks > 0:
-        sitelink_clauses += f"""
-  ?author wikibase:sitelinks ?authorSitelinks .
-  FILTER(?authorSitelinks >= {min_author_sitelinks})"""
+        sitelink_filters += f"\n  FILTER(?authorSitelinks >= {min_author_sitelinks})"
 
     return f"""
 SELECT DISTINCT ?work ?workLabel ?workType ?workTypeLabel
        ?author ?authorLabel ?pubDate
-       ?authorArticle ?workArticle
+       ?authorArticle ?workArticle ?workSitelinks ?authorSitelinks
 WHERE {{{{
   VALUES ?workType {{{{{ values_block } }}}}
   ?work wdt:P31 ?workType ;
-        wdt:{creator_prop} ?author .
+        wdt:{creator_prop} ?author ;
+        wikibase:sitelinks ?workSitelinks .
+  ?author wikibase:sitelinks ?authorSitelinks .
   ?work rdfs:label ?workLabel .
   ?author rdfs:label ?authorLabel .
   FILTER(LANG(?workLabel) = "en")
-  FILTER(LANG(?authorLabel) = "en"){sitelink_clauses}
+  FILTER(LANG(?authorLabel) = "en"){sitelink_filters}
 
   ?authorArticle schema:about ?author ;
                  schema:isPartOf <https://en.wikipedia.org/> .
@@ -1071,29 +1069,27 @@ def _build_named_after_query(
 ) -> str:
     """Build a SPARQL query for science items using P138 (named after)."""
     values_block = " ".join(f"wd:{qid}" for qid in work_type_qids)
-    sitelink_clauses = ""
+    sitelink_filters = ""
     if min_work_sitelinks > 0:
-        sitelink_clauses += f"""
-  ?work wikibase:sitelinks ?workSitelinks .
-  FILTER(?workSitelinks >= {min_work_sitelinks})"""
+        sitelink_filters += f"\n  FILTER(?workSitelinks >= {min_work_sitelinks})"
     if min_author_sitelinks > 0:
-        sitelink_clauses += f"""
-  ?author wikibase:sitelinks ?authorSitelinks .
-  FILTER(?authorSitelinks >= {min_author_sitelinks})"""
+        sitelink_filters += f"\n  FILTER(?authorSitelinks >= {min_author_sitelinks})"
 
     return f"""
 SELECT DISTINCT ?work ?workLabel ?workType ?workTypeLabel
        ?author ?authorLabel ?pubDate
-       ?authorArticle ?workArticle
+       ?authorArticle ?workArticle ?workSitelinks ?authorSitelinks
 WHERE {{{{
   VALUES ?workType {{{{{ values_block } }}}}
   ?work wdt:P31 ?workType ;
-        wdt:P138 ?author .
-  ?author wdt:P31 wd:Q5 .
+        wdt:P138 ?author ;
+        wikibase:sitelinks ?workSitelinks .
+  ?author wdt:P31 wd:Q5 ;
+          wikibase:sitelinks ?authorSitelinks .
   ?work rdfs:label ?workLabel .
   ?author rdfs:label ?authorLabel .
   FILTER(LANG(?workLabel) = "en")
-  FILTER(LANG(?authorLabel) = "en"){sitelink_clauses}
+  FILTER(LANG(?authorLabel) = "en"){sitelink_filters}
 
   ?authorArticle schema:about ?author ;
                  schema:isPartOf <https://en.wikipedia.org/> .
@@ -1277,6 +1273,8 @@ def _normalize_author_work_df(
     chunk["verb"] = domain_cfg["verb"]
     chunk["role"] = domain_cfg["role"]
     chunk["science_attribution"] = False
+    chunk["work_sitelinks"] = pd.to_numeric(raw.get("workSitelinks", pd.Series(dtype=float)), errors="coerce").fillna(0).astype(int)
+    chunk["author_sitelinks"] = pd.to_numeric(raw.get("authorSitelinks", pd.Series(dtype=float)), errors="coerce").fillna(0).astype(int)
     return chunk
 
 

@@ -207,18 +207,16 @@ class BiologyGenerator(BaseGenerator):
         self._order_groups = self._build_groups(self._organisms, "order")
         self._class_groups = self._build_groups(self._organisms, "class_")
 
-        # Build sitelink-proportional sampling weights.
-        # Use sitelinks as a proxy for notability — organisms with more
-        # Wikipedia articles across languages are more recognizable to LLMs.
+        # Build sitelink-proportional sampling weights via BaseGenerator.
         sitelinks = self._organisms.get("sitelinks", pd.Series(0, index=self._organisms.index))
-        sitelinks = pd.to_numeric(sitelinks, errors="coerce").fillna(0).clip(lower=1)
-        total = sitelinks.sum()
-        self._sample_weights = (sitelinks / total).tolist()
+        sitelinks = pd.to_numeric(sitelinks, errors="coerce").fillna(0)
+        self._sample_weights = self.build_weights(sitelinks.tolist())
 
         # Log distribution stats
-        median_sl = sitelinks.median()
-        p90_sl = sitelinks.quantile(0.9)
-        p99_sl = sitelinks.quantile(0.99)
+        sl_clamped = sitelinks.clip(lower=1)
+        median_sl = sl_clamped.median()
+        p90_sl = sl_clamped.quantile(0.9)
+        p99_sl = sl_clamped.quantile(0.99)
         logger.info(
             "Biology data loaded: %d species, %d families, %d orders, %d classes",
             len(self._organisms),
@@ -299,53 +297,12 @@ class BiologyGenerator(BaseGenerator):
         """Ensure sampling weights are initialized (for test fixtures that bypass _load_data)."""
         if self._sample_weights is not None:
             return
-        n = len(self._organisms)
         if "sitelinks" in self._organisms.columns:
-            sitelinks = pd.to_numeric(self._organisms["sitelinks"], errors="coerce").fillna(0).clip(lower=1)
-            total = sitelinks.sum()
-            self._sample_weights = (sitelinks / total).tolist()
+            sitelinks = pd.to_numeric(self._organisms["sitelinks"], errors="coerce").fillna(0)
+            self._sample_weights = self.build_weights(sitelinks.tolist())
         else:
-            # Uniform weights when sitelinks not available
+            n = len(self._organisms)
             self._sample_weights = [1.0 / n] * n
-
-    def _weighted_sample_indices(self, n: int) -> list[int]:
-        """Sample n unique organism indices with probability proportional to sitelinks."""
-        self._ensure_weights()
-        indices = list(self._organisms.index)
-        weights = self._sample_weights
-        sampled = []
-        seen: set[int] = set()
-        while len(sampled) < n and len(seen) < len(indices):
-            batch = self.rng.choices(indices, weights=weights, k=min(n * 2, len(indices)))
-            for idx in batch:
-                if idx not in seen:
-                    seen.add(idx)
-                    sampled.append(idx)
-                    if len(sampled) >= n:
-                        break
-        return sampled
-
-    def _weighted_pick(self, candidate_indices: list[int], k: int = 1) -> list[int]:
-        """Pick k unique indices from candidates, weighted by sitelinks."""
-        if not candidate_indices or k <= 0:
-            return []
-        self._ensure_weights()
-        weights = [self._sample_weights[i] for i in candidate_indices]
-        total = sum(weights)
-        if total == 0:
-            return self.rng.sample(candidate_indices, min(k, len(candidate_indices)))
-        weights = [w / total for w in weights]
-        picked = []
-        seen: set[int] = set()
-        while len(picked) < k and len(seen) < len(candidate_indices):
-            batch = self.rng.choices(candidate_indices, weights=weights, k=min(k * 2, len(candidate_indices)))
-            for idx in batch:
-                if idx not in seen:
-                    seen.add(idx)
-                    picked.append(idx)
-                    if len(picked) >= k:
-                        break
-        return picked
 
     # --- Taxonomic membership ---
 
@@ -354,7 +311,10 @@ class BiologyGenerator(BaseGenerator):
         organisms = self._organisms
         # Sample organisms with probability proportional to sitelinks
         # so well-known species appear more often than obscure ones.
-        indices = self._weighted_sample_indices(len(organisms))
+        self._ensure_weights()
+        indices = self.weighted_sample(
+            list(organisms.index), self._sample_weights, len(organisms)
+        )
 
         # Ranks to generate membership statements for (skip species — it's the organism itself).
         # Restrict to family and order only. The 2021 ICNP bacterial reclassification
@@ -510,7 +470,8 @@ class BiologyGenerator(BaseGenerator):
                     continue
 
                 # Pick a true pair (same group), weighted by sitelinks
-                picked = self._weighted_pick(member_indices, k=2)
+                self._ensure_weights()
+                picked = self.weighted_pick(member_indices, self._sample_weights, k=2)
                 if len(picked) < 2:
                     continue
                 idx_a, idx_b = picked[0], picked[1]
@@ -531,7 +492,7 @@ class BiologyGenerator(BaseGenerator):
                 ]
                 if not other_indices:
                     continue
-                idx_c = self._weighted_pick(other_indices, k=1)[0]
+                idx_c = self.weighted_pick(other_indices, self._sample_weights, k=1)[0]
                 name_c = self._organism_name(idx_c)
 
                 false_stmt = render_template(template.pattern,
