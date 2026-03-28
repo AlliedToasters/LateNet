@@ -48,6 +48,19 @@ def sibling_swap(
     return stmt, NegationStrategy.SIBLING_SWAP, neg
 
 
+def cousin_swap(
+    relationship: Relationship,
+    template: Template,
+    rng: random.Random,
+) -> tuple[str, NegationStrategy, Synset] | None:
+    """Generate false statement by swapping target with a cousin synset (medium)."""
+    neg = pick_negation_synset(relationship.source, relationship.target, Difficulty.MEDIUM, rng)
+    if neg is None:
+        return None
+    stmt = _swap_target_name(relationship, template, neg)
+    return stmt, NegationStrategy.COUSIN_SWAP, neg
+
+
 def distant_swap(
     relationship: Relationship,
     template: Template,
@@ -247,6 +260,10 @@ def apply_negation(
         sib = sibling_swap(relationship, template, rng)
         if sib:
             results.append(sib)
+
+        cuz = cousin_swap(relationship, template, rng)
+        if cuz:
+            results.append(cuz)
 
         dist = distant_swap(relationship, template, rng)
         if dist:

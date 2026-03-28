@@ -26,6 +26,7 @@ class Difficulty(Enum):
 
 class NegationStrategy(Enum):
     SIBLING_SWAP = "sibling_swap"
+    COUSIN_SWAP = "cousin_swap"
     DISTANT_SWAP = "distant_swap"
     DIRECT_NEGATION = "direct_negation"
     REVERSE_RELATION = "reverse_relation"
