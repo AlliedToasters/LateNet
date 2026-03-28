@@ -277,3 +277,33 @@ class TestBuildLineage:
         assert lion["genus"] == "Panthera"
         assert lion["family"] == "cat"  # chains through subfamily bridge
         assert lion["order"] == "Carnivora"
+
+
+# ---------------------------------------------------------------------------
+# Common name resolution
+# ---------------------------------------------------------------------------
+
+class TestCommonNameResolution:
+    """Tests for scientific-to-common-name resolution."""
+
+    def test_common_names_json_loads(self):
+        """The bundled common_names.json is valid and non-empty."""
+        from latenet.datasources.wikidata import _COMMON_NAMES
+        assert isinstance(_COMMON_NAMES, dict)
+        assert len(_COMMON_NAMES) > 100
+
+    def test_binomial_regex_matches_scientific(self):
+        """The binomial regex matches Latin binomials but not common names."""
+        from latenet.datasources.wikidata import _BINOMIAL_RE
+        assert _BINOMIAL_RE.match("Canis lupus")
+        assert _BINOMIAL_RE.match("Prunus persica")
+        assert not _BINOMIAL_RE.match("red fox")
+        assert not _BINOMIAL_RE.match("dog")
+        assert not _BINOMIAL_RE.match("Q12345")
+
+    def test_known_mappings(self):
+        """Spot-check a few well-known scientific-to-common mappings."""
+        from latenet.datasources.wikidata import _COMMON_NAMES
+        assert _COMMON_NAMES.get("Canis lupus") == "wolf"
+        assert _COMMON_NAMES.get("Ananas comosus") == "pineapple"
+        assert _COMMON_NAMES.get("Prunus persica") == "peach"

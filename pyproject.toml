@@ -52,6 +52,9 @@ Repository = "https://github.com/AlliedToasters/LateNet"
 [tool.setuptools.packages.find]
 include = ["latenet*", "scripts*"]
 
+[tool.setuptools.package-data]
+"latenet.datasources" = ["*.json"]
+
 [tool.ruff]
 line-length = 100
 

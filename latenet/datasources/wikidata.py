@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -18,6 +19,21 @@ import requests
 logger = logging.getLogger(__name__)
 
 CACHE_ROOT = Path.home() / ".cache" / "latenet" / "wikidata"
+_COMMON_NAMES_PATH = Path(__file__).parent / "common_names.json"
+
+# Binomial scientific name pattern: "Genus species" (capitalized Latin genus + lowercase epithet)
+_BINOMIAL_RE = re.compile(r"^[A-Z][a-z]+ [a-z]+$")
+
+
+def _load_common_names() -> dict[str, str]:
+    """Load the scientific-to-common-name mapping from the bundled JSON file."""
+    if _COMMON_NAMES_PATH.exists():
+        with open(_COMMON_NAMES_PATH) as f:
+            return json.load(f)
+    return {}
+
+
+_COMMON_NAMES: dict[str, str] = _load_common_names()
 SPARQL_ENDPOINT = "https://query.wikidata.org/sparql"
 USER_AGENT = (
     "LateNet/0.1 (https://github.com/AlliedToasters/latenet; research dataset generation)"
@@ -624,6 +640,15 @@ def load_organisms(
 
     # Filter out entities whose name looks like a QID (no label resolved)
     df = df[~df["name"].str.match(r"^Q\d+$", na=False)].copy()
+
+    # Resolve scientific names to common names where possible
+    if _COMMON_NAMES:
+        is_binomial = df["common_name"].fillna("").apply(lambda x: bool(_BINOMIAL_RE.match(x)))
+        resolved = df.loc[is_binomial, "common_name"].map(_COMMON_NAMES)
+        n_resolved = resolved.notna().sum()
+        df.loc[resolved.dropna().index, "common_name"] = resolved.dropna()
+        if n_resolved:
+            logger.info("Resolved %d scientific names to common names", n_resolved)
 
     logger.info("Raw organisms: %d unique entities", len(df))
 
