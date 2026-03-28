@@ -160,7 +160,20 @@ class GeographyGenerator(BaseGenerator):
         self._countries["_centroid"] = self._countries.geometry.centroid
         self._countries["_lat"] = self._countries["_centroid"].y
         self._countries["_lon"] = self._countries["_centroid"].x
-        self._countries["_name"] = self._countries[name_col]
+        # Expand abbreviated country names from Natural Earth
+        _NAME_FIXES = {
+            "S. Sudan": "South Sudan",
+            "N. Korea": "North Korea",
+            "S. Korea": "South Korea",
+            "Dem. Rep. Congo": "Democratic Republic of the Congo",
+            "Central African Rep.": "Central African Republic",
+            "Dominican Rep.": "Dominican Republic",
+            "Eq. Guinea": "Equatorial Guinea",
+            "eSwatini": "Eswatini",
+            "Bosnia and Herz.": "Bosnia and Herzegovina",
+            "Solomon Is.": "Solomon Islands",
+        }
+        self._countries["_name"] = self._countries[name_col].replace(_NAME_FIXES)
 
         # Area in km² using Mollweide equal-area projection
         mollweide = self._countries.to_crs("+proj=moll")
