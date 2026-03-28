@@ -235,13 +235,13 @@ class TestRank:
             assert p.relation_type == "has_rank"
             assert p.domain == "taxonomy"
 
-    def test_species_more_specific_than_genus(self):
+    def test_species_lower_rank_than_genus(self):
         gen = _make_generator()
         pairs = list(gen._generate_rank())
         species_genus = [
             p for p in pairs
             if "pecies" in p.true_statement and "genus" in p.true_statement
-            and "more specific" in p.true_statement
+            and "lower rank" in p.true_statement
         ]
         assert len(species_genus) > 0
 

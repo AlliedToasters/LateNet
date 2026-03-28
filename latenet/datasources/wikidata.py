@@ -492,6 +492,13 @@ LIMIT {{limit}} OFFSET {{offset}}
 """
 
 
+def _normalize_name(name: str) -> str:
+    """Capitalize first letter if lowercase — likely Wikidata label bug."""
+    if not isinstance(name, str) or not name or name[0].isupper():
+        return name
+    return name[0].upper() + name[1:]
+
+
 def _extract_qid(uri: str) -> str:
     """Extract QID from a Wikidata entity URI."""
     if not isinstance(uri, str):
@@ -617,8 +624,8 @@ def load_organisms(
 
         chunk = pd.DataFrame()
         chunk["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
-        chunk["name"] = raw.get("itemLabel", pd.Series(dtype=str))
-        chunk["common_name"] = raw.get("itemLabel", pd.Series(dtype=str))  # use label as common name
+        chunk["name"] = raw.get("itemLabel", pd.Series(dtype=str)).apply(_normalize_name)
+        chunk["common_name"] = raw.get("itemLabel", pd.Series(dtype=str)).apply(_normalize_name)
         chunk["taxon_rank"] = rank_label
         chunk["parent_taxon_qid"] = raw.get("parentTaxon", pd.Series(dtype=str)).apply(_extract_qid)
         chunk["parent_taxon_label"] = raw.get("parentTaxonLabel", pd.Series(dtype=str))
@@ -854,7 +861,7 @@ def load_historical_events(
     # Normalize columns
     df = pd.DataFrame()
     df["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
-    df["name"] = raw.get("itemLabel", pd.Series(dtype=str))
+    df["name"] = raw.get("itemLabel", pd.Series(dtype=str)).apply(_normalize_name)
     df["description"] = raw.get("itemDescription", pd.Series(dtype=str))
     df["date"] = raw.get("date", pd.Series(dtype=str))
     df["event_type_uri"] = raw.get("eventType", pd.Series(dtype=str))
@@ -932,7 +939,7 @@ def load_notable_people(
 
         chunk = pd.DataFrame()
         chunk["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
-        chunk["name"] = raw.get("itemLabel", pd.Series(dtype=str))
+        chunk["name"] = raw.get("itemLabel", pd.Series(dtype=str)).apply(_normalize_name)
         chunk["birth_date"] = raw.get("birthDate", pd.Series(dtype=str))
         chunk["death_date"] = raw.get("deathDate", pd.Series(dtype=str))
         chunk["occupation"] = occ_label

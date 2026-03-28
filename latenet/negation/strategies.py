@@ -103,10 +103,10 @@ def negate_statement(statement: str) -> str:
     s = re.sub(r"\bis a component of\b", "is not a component of", s, count=1)
     if s != original:
         return s
-    s = re.sub(r"\bis a more specific rank\b", "is not a more specific rank", s, count=1)
+    s = re.sub(r"\bis a lower rank\b", "is not a lower rank", s, count=1)
     if s != original:
         return s
-    s = re.sub(r"\bis a more general rank\b", "is not a more general rank", s, count=1)
+    s = re.sub(r"\bis a higher rank\b", "is not a higher rank", s, count=1)
     if s != original:
         return s
     s = re.sub(r"\bis a higher level\b", "is not a higher level", s, count=1)
@@ -298,6 +298,9 @@ def negate_statement(statement: str) -> str:
 
     # --- "belongs to" / "has" / "lies" / "share" patterns ---
     s = re.sub(r"\bbelongs to\b", "does not belong to", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bboth belong to\b", "do not both belong to", s, count=1)
     if s != original:
         return s
     s = re.sub(r"\bbelong to\b", "do not belong to", s, count=1)

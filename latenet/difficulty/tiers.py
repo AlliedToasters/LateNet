@@ -100,12 +100,20 @@ def pick_negation_synset(
     rng: random.Random,
 ) -> Synset | None:
     """Pick a replacement synset for the false statement at the desired difficulty."""
+    source_lemmas = {l.name().lower() for l in source.lemmas()}
+
+    def _no_overlap(pool: list) -> list:
+        """Exclude synsets sharing any lemma with source (avoids tautologies)."""
+        return [
+            s for s in pool
+            if s.name() != source.name()
+            and not source_lemmas & {l.name().lower() for l in s.lemmas()}
+        ]
+
     if difficulty == Difficulty.HARD:
-        pool = _siblings_of(target)
-        pool = [s for s in pool if s.name() != source.name()]
+        pool = _no_overlap(_siblings_of(target))
     elif difficulty == Difficulty.MEDIUM:
-        pool = _cousins_of(target)
-        pool = [s for s in pool if s.name() != source.name()]
+        pool = _no_overlap(_cousins_of(target))
     elif difficulty == Difficulty.EASY:
         return _distant_synset(target, rng)
     else:
