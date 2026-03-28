@@ -281,6 +281,12 @@ def main():
              "At concurrency > 1, NDIF uses server-side batching and "
              "Anthropic calls run concurrently. Values of 4-8 are recommended.",
     )
+    parser.add_argument(
+        "--expand-negated", action="store_true",
+        help="Generate negated variants of every statement (4 rows per pair). "
+             "Negated rows are mechanically produced (insert 'not', flip label) "
+             "and inherit the validation status of the original.",
+    )
     args = parser.parse_args()
 
     legs = set(args.legs)
@@ -329,7 +335,7 @@ def main():
                 continue
             seen.add(true_text)
             seen.add(false_text)
-            all_rows.extend(pair.to_rows())
+            all_rows.extend(pair.to_rows(expand_negated=args.expand_negated))
             count += 1
 
         elapsed = time.monotonic() - t0

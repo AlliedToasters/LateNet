@@ -67,8 +67,15 @@ class ContrastivePair:
         self.true_statement = sanitize_statement(self.true_statement)
         self.false_statement = sanitize_statement(self.false_statement)
 
-    def to_rows(self) -> list[dict]:
-        """Expand into true + false row dicts for DataFrame export."""
+    def to_rows(self, expand_negated: bool = False) -> list[dict]:
+        """Expand into row dicts for DataFrame export.
+
+        Parameters
+        ----------
+        expand_negated : bool
+            If True, also produce negated variants (4 rows total instead of 2).
+            Negated rows have ``negated=True`` and flipped labels.
+        """
         base = {
             "pair_id": self.pair_id,
             "domain": self.domain,
@@ -88,12 +95,34 @@ class ContrastivePair:
             "id": f"{self.pair_id}_true",
             "statement": self.true_statement,
             "label": True,
+            "negated": False,
             **base,
         }
         false_row = {
             "id": f"{self.pair_id}_false",
             "statement": self.false_statement,
             "label": False,
+            "negated": False,
             **base,
         }
-        return [true_row, false_row]
+        rows = [true_row, false_row]
+
+        if expand_negated:
+            from latenet.negation.strategies import negate_statement
+
+            rows.append({
+                "id": f"{self.pair_id}_neg_true",
+                "statement": negate_statement(self.true_statement),
+                "label": False,  # was True, negation flips it
+                "negated": True,
+                **base,
+            })
+            rows.append({
+                "id": f"{self.pair_id}_neg_false",
+                "statement": negate_statement(self.false_statement),
+                "label": True,  # was False, negation flips it
+                "negated": True,
+                **base,
+            })
+
+        return rows

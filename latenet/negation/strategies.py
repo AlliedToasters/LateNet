@@ -61,26 +61,155 @@ def distant_swap(
     return stmt, NegationStrategy.DISTANT_SWAP, neg
 
 
+def negate_statement(statement: str) -> str:
+    """Mechanically negate a statement by inserting 'not'.
+
+    Tries a series of pattern-specific rules covering all generator domains.
+    Falls back to 'It is not true that ...' if no pattern matches.
+    Returns the negated string.
+    """
+    original = statement
+    s = statement
+
+    # --- Copula / linking verb patterns (WordNet, biology, chemistry, etc.) ---
+    s = re.sub(r"\bis a\b", "is not a", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis an\b", "is not an", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis classified as\b", "is not classified as", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis a type of\b", "is not a type of", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis a kind of\b", "is not a kind of", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis a component of\b", "is not a component of", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis a more specific rank\b", "is not a more specific rank", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis a more general rank\b", "is not a more general rank", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis a higher level\b", "is not a higher level", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis a factor of\b", "is not a factor of", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis divisible by\b", "is not divisible by", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis located\b", "is not located", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis in the same\b", "is not in the same", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis nearer to\b", "is not nearer to", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis part of\b", "is not part of", s, count=1)
+    if s != original:
+        return s
+
+    # --- "are" patterns (siblings, contemporaries) ---
+    s = re.sub(r"\bare both\b", "are not both", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bare in the same\b", "are not in the same", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bare antonyms\b", "are not antonyms", s, count=1)
+    if s != original:
+        return s
+
+    # --- Verb patterns (temporal, authorship) ---
+    s = re.sub(r"\bwas born before\b", "was not born before", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bwas born earlier\b", "was not born earlier", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bwas composed by\b", "was not composed by", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bwas written by\b", "was not written by", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bwas directed by\b", "was not directed by", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bwas painted by\b", "was not painted by", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bwas a\b", "was not a", s, count=1)
+    if s != original:
+        return s
+
+    # --- Active verb patterns ---
+    s = re.sub(r"\bwrote\b", "did not write", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bcomposed\b", "did not compose", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bdirected\b", "did not direct", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bpainted\b", "did not paint", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bpredates\b", "does not predate", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bexceeds\b", "does not exceed", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bcovers more\b", "does not cover more", s, count=1)
+    if s != original:
+        return s
+
+    # --- "belongs to" / "has" / "lies" patterns ---
+    s = re.sub(r"\bbelongs to\b", "does not belong to", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bbelong to\b", "do not belong to", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\blies to the\b", "does not lie to the", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bhas a\b", "does not have a", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bhas an\b", "does not have an", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bhas\b", "does not have", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bwere contemporaries\b", "were not contemporaries", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\boccurred in\b", "did not occur in", s, count=1)
+    if s != original:
+        return s
+
+    # --- Fallback ---
+    return f"It is not true that {original[0].lower()}{original[1:]}"
+
+
 def direct_negation(
     true_statement: str,
 ) -> tuple[str, NegationStrategy, None]:
     """Insert 'not' into the true statement to make it false."""
-    stmt = true_statement
-    stmt = re.sub(r"\bis a\b", "is not a", stmt, count=1)
-    stmt = re.sub(r"\bis an\b", "is not an", stmt, count=1)
-    stmt = re.sub(r"\bhas a\b", "does not have a", stmt, count=1)
-    stmt = re.sub(r"\bhas an\b", "does not have an", stmt, count=1)
-    stmt = re.sub(r"\bare both\b", "are not both", stmt, count=1)
-    stmt = re.sub(r"\bare antonyms\b", "are not antonyms", stmt, count=1)
-    stmt = re.sub(r"\bbelongs to\b", "does not belong to", stmt, count=1)
-
-    # Bare "has" without article (uncountable nouns: "Outer space has interstellar space")
-    if stmt == true_statement:
-        stmt = re.sub(r"\bhas\b", "does not have", stmt, count=1)
-
-    if stmt == true_statement:
-        stmt = f"It is not true that {true_statement[0].lower()}{true_statement[1:]}"
-
+    stmt = negate_statement(true_statement)
     return stmt, NegationStrategy.DIRECT_NEGATION, None
 
 

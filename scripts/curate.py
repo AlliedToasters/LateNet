@@ -90,9 +90,9 @@ def main():
             generator_caps[gen_name] = int(cap_str)
 
     # Group by pair_id to ensure we keep true+false together
-    # Each pair_id should have exactly 2 rows
+    # Each pair_id has 2 rows (affirmative only) or 4 rows (with negated variants)
     pair_groups = clean.groupby("pair_id")
-    valid_pairs = pair_groups.filter(lambda g: len(g) == 2)
+    valid_pairs = pair_groups.filter(lambda g: len(g) in (2, 4))
 
     # Get unique pairs with their stratum info
     pair_meta = valid_pairs.groupby("pair_id").first()[["generator", "difficulty"]].reset_index()

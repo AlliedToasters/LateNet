@@ -66,6 +66,9 @@ def load_ledger(ledger_dir: Path = DEFAULT_LEDGER_DIR) -> pd.DataFrame:
     path = ledger_dir / LEDGER_FILENAME
     if path.exists():
         df = pd.read_parquet(path)
+        # Backfill negated column for ledgers created before negation support
+        if "negated" not in df.columns:
+            df["negated"] = False
         logger.info("Loaded ledger: %d rows from %s", len(df), path)
         return df
     logger.info("No existing ledger at %s", path)
