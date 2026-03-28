@@ -224,9 +224,7 @@ class TestAtomicNumber:
         gen = _make_generator(magnitude_ratio=3.0)
         pairs = list(gen._generate_atomic_number())
         for p in pairs:
-            assert p.difficulty in (
-                Difficulty.HARD.value, Difficulty.MEDIUM.value, Difficulty.EASY.value
-            )
+            assert p.difficulty == "mixed"
 
 
 class TestPropertyComparison:
@@ -312,6 +310,5 @@ class TestEdgeCases:
     def test_difficulty_values(self):
         gen = _make_generator()
         pairs = list(gen.generate())
-        valid_diffs = {Difficulty.HARD.value, Difficulty.MEDIUM.value, Difficulty.EASY.value}
         for p in pairs:
-            assert p.difficulty in valid_diffs
+            assert p.difficulty == "mixed"

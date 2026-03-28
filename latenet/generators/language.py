@@ -415,7 +415,7 @@ class LanguageGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="language",
                     relation_type="translates_to",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=sem_dist,
                     generator=self.name,
                     template_id=template.id,
@@ -427,6 +427,7 @@ class LanguageGenerator(BaseGenerator):
                         "target_lang": lang,
                         "true_translation": true_translation,
                         "false_translation": swap_translation,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -517,7 +518,7 @@ class LanguageGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="language",
                     relation_type="translation_of",
-                    difficulty=Difficulty.HARD.value,
+                    difficulty="mixed",
                     semantic_distance=1,
                     generator=self.name,
                     template_id=template.id,
@@ -529,6 +530,7 @@ class LanguageGenerator(BaseGenerator):
                         "target_lang": lang,
                         "true_translation": true_translation,
                         "false_english": swap_english,
+                        "swap_distance": Difficulty.HARD.value,
                     },
                 )
 
@@ -593,7 +595,7 @@ class LanguageGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="language",
                     relation_type="word_is_language",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=dist,
                     generator=self.name,
                     template_id=template.id,
@@ -606,6 +608,7 @@ class LanguageGenerator(BaseGenerator):
                         "word": true_translation,
                         "true_lang": true_lang,
                         "false_lang": false_lang,
+                        "swap_distance": difficulty,
                     },
                 )
 

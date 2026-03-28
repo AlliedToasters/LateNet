@@ -406,7 +406,7 @@ class MathematicsGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="mathematics",
                     relation_type="has_property",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -415,6 +415,7 @@ class MathematicsGenerator(BaseGenerator):
                         "number": n,
                         "true_property": true_prop,
                         "false_property": false_prop,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -483,7 +484,7 @@ class MathematicsGenerator(BaseGenerator):
             return ContrastivePair(
                 true_statement=true_stmt, false_statement=false_stmt,
                 pair_id=pair_id, domain="mathematics",
-                relation_type="greater_than", difficulty=difficulty,
+                relation_type="greater_than", difficulty="mixed",
                 semantic_distance=None, generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
@@ -491,6 +492,7 @@ class MathematicsGenerator(BaseGenerator):
                     "big": big,
                     "small": small_n,
                     "ratio": round(big / small_n, 2) if small_n > 0 else None,
+                    "swap_distance": difficulty,
                 },
             )
 
@@ -597,7 +599,7 @@ class MathematicsGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="mathematics",
                     relation_type="is_divisible_by",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -606,6 +608,7 @@ class MathematicsGenerator(BaseGenerator):
                         "dividend": a,
                         "true_divisor": true_d,
                         "false_divisor": false_d,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -673,7 +676,7 @@ class MathematicsGenerator(BaseGenerator):
                         pair_id=pair_id,
                         domain="mathematics",
                         relation_type="arithmetic_result",
-                        difficulty=diff_label,
+                        difficulty="mixed",
                         semantic_distance=None,
                         generator=self.name,
                         template_id=template.id,
@@ -684,6 +687,7 @@ class MathematicsGenerator(BaseGenerator):
                             "operand_b": b,
                             "true_result": result,
                             "false_result": false_result,
+                            "swap_distance": diff_label,
                         },
                     )
 
@@ -731,7 +735,7 @@ class MathematicsGenerator(BaseGenerator):
             yield ContrastivePair(
                 true_statement=true_stmt, false_statement=false_stmt,
                 pair_id=pair_id, domain="mathematics",
-                relation_type="more_factors", difficulty=Difficulty.HARD.value,
+                relation_type="more_factors", difficulty="mixed",
                 semantic_distance=None, generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
@@ -740,6 +744,7 @@ class MathematicsGenerator(BaseGenerator):
                     "fewer_factors_number": b,
                     "factors_a": num_factors(a),
                     "factors_b": num_factors(b),
+                    "swap_distance": Difficulty.HARD.value,
                 },
             )
 
@@ -765,7 +770,7 @@ class MathematicsGenerator(BaseGenerator):
             yield ContrastivePair(
                 true_statement=true_stmt, false_statement=false_stmt,
                 pair_id=pair_id, domain="mathematics",
-                relation_type="more_factors", difficulty=Difficulty.MEDIUM.value,
+                relation_type="more_factors", difficulty="mixed",
                 semantic_distance=None, generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
@@ -774,6 +779,7 @@ class MathematicsGenerator(BaseGenerator):
                     "fewer_factors_number": b,
                     "factors_a": num_factors(a),
                     "factors_b": num_factors(b),
+                    "swap_distance": Difficulty.MEDIUM.value,
                 },
             )
 
@@ -802,7 +808,7 @@ class MathematicsGenerator(BaseGenerator):
             yield ContrastivePair(
                 true_statement=true_stmt, false_statement=false_stmt,
                 pair_id=pair_id, domain="mathematics",
-                relation_type="more_factors", difficulty=Difficulty.EASY.value,
+                relation_type="more_factors", difficulty="mixed",
                 semantic_distance=None, generator=self.name,
                 template_id=template.id,
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
@@ -811,6 +817,7 @@ class MathematicsGenerator(BaseGenerator):
                     "fewer_factors_number": b,
                     "factors_a": num_factors(a),
                     "factors_b": num_factors(b),
+                    "swap_distance": Difficulty.EASY.value,
                 },
             )
 
@@ -889,7 +896,7 @@ class MathematicsGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="mathematics",
                     relation_type="shares_factor",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -899,5 +906,6 @@ class MathematicsGenerator(BaseGenerator):
                         "number_b": b,
                         "shares_factor": share_factor,
                         "gcd": _g,
+                        "swap_distance": difficulty,
                     },
                 )

@@ -264,9 +264,8 @@ class TestDifficultyTiers:
     def test_difficulty_values_valid(self):
         gen = _make_generator()
         pairs = list(gen.generate())
-        valid_diffs = {Difficulty.HARD.value, Difficulty.MEDIUM.value, Difficulty.EASY.value}
         for p in pairs:
-            assert p.difficulty in valid_diffs
+            assert p.difficulty == "mixed"
 
     def test_same_domain_same_era_is_hard(self):
         gen = _make_generator()

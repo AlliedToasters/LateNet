@@ -351,7 +351,7 @@ class AuthorshipGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="authorship",
                     relation_type="created_by",
-                    difficulty=actual_difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -365,6 +365,7 @@ class AuthorshipGenerator(BaseGenerator):
                         "author": author_name,
                         "false_author": swap_author,
                         "creative_domain": domain,
+                        "swap_distance": actual_difficulty,
                     },
                 )
 
@@ -453,7 +454,7 @@ class AuthorshipGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="authorship",
                 relation_type="author_of",
-                difficulty=difficulty,
+                difficulty="mixed",
                 semantic_distance=None,
                 generator=self.name,
                 template_id=template.id,
@@ -468,6 +469,7 @@ class AuthorshipGenerator(BaseGenerator):
                     "false_work": false_work,
                     "false_work_idx": int(false_idx),
                     "role": role,
+                    "swap_distance": difficulty,
                 },
             )
 
@@ -528,7 +530,7 @@ class AuthorshipGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="authorship",
                 relation_type="worked_in_domain",
-                difficulty=Difficulty.EASY.value,
+                difficulty="mixed",
                 semantic_distance=None,
                 generator=self.name,
                 template_id=template.id,
@@ -539,5 +541,6 @@ class AuthorshipGenerator(BaseGenerator):
                     "author_idx": int(idx),
                     "true_role": true_role,
                     "false_role": false_role,
+                    "swap_distance": Difficulty.EASY.value,
                 },
             )

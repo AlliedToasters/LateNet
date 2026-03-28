@@ -204,7 +204,7 @@ class AstronomyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="astronomy",
                     relation_type="orbits",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -213,6 +213,7 @@ class AstronomyGenerator(BaseGenerator):
                         "moon": moon.name,
                         "true_parent": true_parent,
                         "false_parent": wrong_parent,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -237,7 +238,7 @@ class AstronomyGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="astronomy",
                 relation_type="orbits",
-                difficulty=Difficulty.EASY.value,
+                difficulty="mixed",
                 semantic_distance=None,
                 generator=self.name,
                 template_id=template.id,
@@ -246,6 +247,7 @@ class AstronomyGenerator(BaseGenerator):
                     "planet": planet.name,
                     "true_parent": "Sun",
                     "false_parent": wrong.name,
+                    "swap_distance": Difficulty.EASY.value,
                 },
             )
 
@@ -331,7 +333,7 @@ class AstronomyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="astronomy",
                     relation_type="closer_to_sun",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -340,6 +342,7 @@ class AstronomyGenerator(BaseGenerator):
                         "closer_planet": closer.name,
                         "farther_planet": farther.name,
                         "order_gap": gap,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -373,7 +376,7 @@ class AstronomyGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="astronomy",
                 relation_type="closer_to_sun",
-                difficulty=difficulty,
+                difficulty="mixed",
                 semantic_distance=None,
                 generator=self.name,
                 template_id=template.id,
@@ -382,6 +385,7 @@ class AstronomyGenerator(BaseGenerator):
                     "planet": planet.name,
                     "true_ordinal": planet.order_from_sun,
                     "false_ordinal": wrong_order,
+                    "swap_distance": difficulty,
                 },
             )
 
@@ -452,7 +456,7 @@ class AstronomyGenerator(BaseGenerator):
                         pair_id=pair_id,
                         domain="astronomy",
                         relation_type="property_greater",
-                        difficulty=difficulty,
+                        difficulty="mixed",
                         semantic_distance=None,
                         generator=self.name,
                         template_id=template.id,
@@ -464,6 +468,7 @@ class AstronomyGenerator(BaseGenerator):
                             "big_value": float(v_big),
                             "small_value": float(v_small),
                             "ratio": round(ratio, 2),
+                            "swap_distance": difficulty,
                         },
                     )
 
@@ -527,7 +532,7 @@ class AstronomyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="astronomy",
                     relation_type="is_type",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -536,6 +541,7 @@ class AstronomyGenerator(BaseGenerator):
                         "body": body.name,
                         "true_type": true_type,
                         "false_type": wrong,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -578,7 +584,7 @@ class AstronomyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="astronomy",
                     relation_type="star_property",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -588,6 +594,7 @@ class AstronomyGenerator(BaseGenerator):
                         "dimmer_star": dimmer.name,
                         "property": "apparent_magnitude",
                         "magnitude_diff": round(mag_diff, 2),
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -623,7 +630,7 @@ class AstronomyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="astronomy",
                     relation_type="star_property",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -633,6 +640,7 @@ class AstronomyGenerator(BaseGenerator):
                         "farther_star": farther.name,
                         "property": "distance_ly",
                         "distance_ratio": round(ratio, 2),
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -697,7 +705,7 @@ class AstronomyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="astronomy",
                     relation_type="in_constellation",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -706,5 +714,6 @@ class AstronomyGenerator(BaseGenerator):
                         "star": star_name,
                         "true_constellation": true_const,
                         "false_constellation": wrong,
+                        "swap_distance": difficulty,
                     },
                 )

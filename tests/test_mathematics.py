@@ -453,11 +453,13 @@ class TestDifficultyTiers:
     def test_all_difficulties_present(self):
         gen = _make_generator(max_pairs=500)
         pairs = list(gen.generate())
-        diffs = {p.difficulty for p in pairs}
+        for p in pairs:
+            assert p.difficulty == "mixed"
+        swap_dists = {p.gen_params.get("swap_distance") for p in pairs if p.gen_params}
         valid = {Difficulty.HARD.value, Difficulty.MEDIUM.value, Difficulty.EASY.value}
-        assert diffs.issubset(valid)
-        # Should have at least 2 difficulty levels
-        assert len(diffs) >= 2
+        assert swap_dists.issubset(valid)
+        # Should have at least 2 swap distance levels
+        assert len(swap_dists) >= 2
 
 
 class TestMaxPairs:

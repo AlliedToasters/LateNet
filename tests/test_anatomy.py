@@ -48,13 +48,13 @@ class TestSystemMembership:
     def test_hard_tier_same_region_different_system(self):
         gen = _make_generator()
         pairs = list(gen._generate_system_membership())
-        hard_pairs = [p for p in pairs if p.difficulty == Difficulty.HARD.value]
+        hard_pairs = [p for p in pairs if p.gen_params.get("swap_distance") == Difficulty.HARD.value]
         assert len(hard_pairs) > 0
 
     def test_all_difficulty_tiers_present(self):
         gen = _make_generator()
         pairs = list(gen._generate_system_membership())
-        diffs = {p.difficulty for p in pairs}
+        diffs = {p.gen_params.get("swap_distance") for p in pairs if p.gen_params}
         assert Difficulty.HARD.value in diffs
         assert Difficulty.EASY.value in diffs
 
@@ -93,7 +93,7 @@ class TestRegionalContainment:
     def test_hard_tier_adjacent_region(self):
         gen = _make_generator()
         pairs = list(gen._generate_regional_containment())
-        hard_pairs = [p for p in pairs if p.difficulty == Difficulty.HARD.value]
+        hard_pairs = [p for p in pairs if p.gen_params.get("swap_distance") == Difficulty.HARD.value]
         assert len(hard_pairs) > 0
 
 
@@ -129,7 +129,7 @@ class TestStructureType:
     def test_all_difficulty_tiers(self):
         gen = _make_generator()
         pairs = list(gen._generate_structure_type())
-        diffs = {p.difficulty for p in pairs}
+        diffs = {p.gen_params.get("swap_distance") for p in pairs if p.gen_params}
         assert Difficulty.HARD.value in diffs
         assert Difficulty.EASY.value in diffs
 
@@ -156,7 +156,7 @@ class TestSameRegion:
     def test_medium_tier_present(self):
         gen = _make_generator()
         pairs = list(gen._generate_same_region())
-        diffs = {p.difficulty for p in pairs}
+        diffs = {p.gen_params.get("swap_distance") for p in pairs if p.gen_params}
         assert Difficulty.MEDIUM.value in diffs
 
 
@@ -174,7 +174,7 @@ class TestSameSystem:
     def test_medium_tier_present(self):
         gen = _make_generator()
         pairs = list(gen._generate_same_system())
-        diffs = {p.difficulty for p in pairs}
+        diffs = {p.gen_params.get("swap_distance") for p in pairs if p.gen_params}
         assert Difficulty.MEDIUM.value in diffs
 
 
@@ -221,9 +221,8 @@ class TestIntegration:
     def test_difficulty_values(self):
         gen = _make_generator()
         pairs = list(gen.generate())
-        valid_diffs = {Difficulty.HARD.value, Difficulty.MEDIUM.value, Difficulty.EASY.value}
         for p in pairs:
-            assert p.difficulty in valid_diffs
+            assert p.difficulty == "mixed"
 
     def test_template_ids_are_stable(self):
         gen = _make_generator()

@@ -352,7 +352,7 @@ class BiologyGenerator(BaseGenerator):
                         pair_id=pair_id,
                         domain="biology",
                         relation_type="is_member_of",
-                        difficulty=difficulty,
+                        difficulty="mixed",
                         semantic_distance=sem_dist,
                         generator=self.name,
                         template_id=template.id,
@@ -363,6 +363,7 @@ class BiologyGenerator(BaseGenerator):
                             "rank": rank_label,
                             "true_taxon": true_taxon,
                             "false_taxon": swap_taxon,
+                            "swap_distance": difficulty,
                         },
                     )
 
@@ -516,7 +517,7 @@ class BiologyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="biology",
                     relation_type="same_taxon",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=lcr_dist,
                     generator=self.name,
                     template_id=template.id,
@@ -531,6 +532,7 @@ class BiologyGenerator(BaseGenerator):
                         "rank": rank_label,
                         "taxon": taxon_name,
                         "lowest_common_rank": lcr,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -574,7 +576,7 @@ class BiologyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="taxonomy",
                     relation_type="has_rank",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=dist,
                     generator=self.name,
                     template_id=template.id,
@@ -583,6 +585,7 @@ class BiologyGenerator(BaseGenerator):
                         "specific_rank": specific,
                         "general_rank": general,
                         "rank_distance": dist,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -605,7 +608,7 @@ class BiologyGenerator(BaseGenerator):
                     pair_id=pair_id2,
                     domain="taxonomy",
                     relation_type="has_rank",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=dist,
                     generator=self.name,
                     template_id=template2.id,
@@ -614,5 +617,6 @@ class BiologyGenerator(BaseGenerator):
                         "specific_rank": specific,
                         "general_rank": general,
                         "rank_distance": dist,
+                        "swap_distance": difficulty,
                     },
                 )

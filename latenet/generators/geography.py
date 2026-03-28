@@ -304,7 +304,7 @@ class GeographyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="geography",
                     relation_type="contained_in",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -314,6 +314,7 @@ class GeographyGenerator(BaseGenerator):
                         "true_country": true_country,
                         "false_country": swap_country,
                         "continent": continent,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -423,7 +424,7 @@ class GeographyGenerator(BaseGenerator):
                             pair_id=pair_id,
                             domain="geography",
                             relation_type="cardinal_direction",
-                            difficulty=diff,
+                            difficulty="mixed",
                             semantic_distance=None,
                             generator=self.name,
                             template_id=template.id,
@@ -433,6 +434,7 @@ class GeographyGenerator(BaseGenerator):
                                 "country_b": b,
                                 "direction": direction,
                                 "margin": round(abs(lat_diff), 2),
+                                "swap_distance": diff,
                             },
                         )
 
@@ -472,7 +474,7 @@ class GeographyGenerator(BaseGenerator):
                             pair_id=pair_id,
                             domain="geography",
                             relation_type="cardinal_direction",
-                            difficulty=diff,
+                            difficulty="mixed",
                             semantic_distance=None,
                             generator=self.name,
                             template_id=template.id,
@@ -482,6 +484,7 @@ class GeographyGenerator(BaseGenerator):
                                 "country_b": b,
                                 "direction": direction,
                                 "margin": round(abs(lon_diff), 2),
+                                "swap_distance": diff,
                             },
                         )
 
@@ -584,7 +587,7 @@ class GeographyGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="geography",
                 relation_type="closer_to",
-                difficulty=diff,
+                difficulty="mixed",
                 semantic_distance=None,
                 generator=self.name,
                 template_id=template.id,
@@ -596,6 +599,7 @@ class GeographyGenerator(BaseGenerator):
                     "distance_near_km": round(d_near, 1),
                     "distance_far_km": round(d_far, 1),
                     "ratio": round(ratio, 2),
+                    "swap_distance": diff,
                 },
             )
 
@@ -657,7 +661,7 @@ class GeographyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="geography",
                     relation_type="population_greater",
-                    difficulty=diff,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -668,6 +672,7 @@ class GeographyGenerator(BaseGenerator):
                         "big_population": int(pop_big),
                         "small_population": int(pop_small),
                         "ratio": round(ratio, 2),
+                        "swap_distance": diff,
                     },
                 )
 
@@ -729,7 +734,7 @@ class GeographyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="geography",
                     relation_type="area_greater",
-                    difficulty=diff,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -740,5 +745,6 @@ class GeographyGenerator(BaseGenerator):
                         "big_area_km2": round(area_big, 1),
                         "small_area_km2": round(area_small, 1),
                         "ratio": round(ratio, 2),
+                        "swap_distance": diff,
                     },
                 )

@@ -214,15 +214,15 @@ class TestTranslatesTo:
     def test_difficulty_tiers_present(self):
         gen = _make_generator()
         pairs = list(gen._generate_translates_to())
-        difficulties = {p.difficulty for p in pairs}
+        swap_distances = {p.gen_params.get("swap_distance") for p in pairs if p.gen_params}
         # Should have at least hard and medium (easy requires cross-language swap)
-        assert Difficulty.HARD.value in difficulties or Difficulty.MEDIUM.value in difficulties
+        assert Difficulty.HARD.value in swap_distances or Difficulty.MEDIUM.value in swap_distances
 
     def test_hard_swap_is_same_domain(self):
         """Hard swaps should use a translation from the same entity domain."""
         gen = _make_generator()
         pairs = list(gen._generate_translates_to())
-        hard_pairs = [p for p in pairs if p.difficulty == Difficulty.HARD.value]
+        hard_pairs = [p for p in pairs if p.gen_params.get("swap_distance") == Difficulty.HARD.value]
         assert len(hard_pairs) > 0
         for p in hard_pairs:
             assert p.negation_strategy == "sibling_swap"
@@ -257,10 +257,11 @@ class TestWordIsLanguage:
         gen = _make_generator()
         pairs = list(gen._generate_word_is_language())
         for p in pairs:
-            if p.difficulty == Difficulty.HARD.value:
+            swap_distance = p.gen_params.get("swap_distance")
+            if swap_distance == Difficulty.HARD.value:
                 # Same sub-family
                 assert p.semantic_distance == 1
-            elif p.difficulty == Difficulty.EASY.value:
+            elif swap_distance == Difficulty.EASY.value:
                 assert p.semantic_distance == 3
 
 

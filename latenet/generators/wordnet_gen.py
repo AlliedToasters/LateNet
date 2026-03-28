@@ -139,7 +139,7 @@ class WordNetGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="wordnet",
                     relation_type=rel.rel_type.value,
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=dist,
                     generator=self.name,
                     template_id=template.id,
@@ -154,6 +154,7 @@ class WordNetGenerator(BaseGenerator):
                         "semantic_distance": dist,
                         "source_name": rel.source_name,
                         "target_name": rel.target_name,
+                        "swap_distance": difficulty,
                     },
                 )
 

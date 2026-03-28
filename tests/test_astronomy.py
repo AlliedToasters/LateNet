@@ -90,7 +90,7 @@ class TestOrdering:
             if "Venus" in p.true_statement and "Earth" in p.true_statement
             and "planet from the Sun" not in p.true_statement
         ]
-        assert all(p.difficulty == Difficulty.HARD.value for p in ve_pairs)
+        assert all(p.gen_params.get("swap_distance") == Difficulty.HARD.value for p in ve_pairs)
 
 
 # --- Property magnitude ---
@@ -184,7 +184,7 @@ class TestClassification:
     def test_medium_tier_present(self):
         gen = _make_generator()
         pairs = list(gen._generate_classification())
-        diffs = {p.difficulty for p in pairs}
+        diffs = {p.gen_params.get("swap_distance") for p in pairs if p.gen_params}
         assert Difficulty.MEDIUM.value in diffs
 
 
@@ -250,7 +250,7 @@ class TestConstellation:
     def test_medium_tier_present(self):
         gen = _make_generator()
         pairs = list(gen._generate_constellation())
-        diffs = {p.difficulty for p in pairs}
+        diffs = {p.gen_params.get("swap_distance") for p in pairs if p.gen_params}
         assert Difficulty.MEDIUM.value in diffs
 
 
@@ -297,9 +297,8 @@ class TestIntegration:
     def test_difficulty_values(self):
         gen = _make_generator()
         pairs = list(gen.generate())
-        valid_diffs = {Difficulty.HARD.value, Difficulty.MEDIUM.value, Difficulty.EASY.value}
         for p in pairs:
-            assert p.difficulty in valid_diffs
+            assert p.difficulty == "mixed"
 
     def test_template_ids_are_stable(self):
         gen = _make_generator()

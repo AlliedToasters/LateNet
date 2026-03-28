@@ -269,7 +269,7 @@ class AnatomyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="anatomy",
                     relation_type="in_system",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -278,6 +278,7 @@ class AnatomyGenerator(BaseGenerator):
                         "structure": struct.name,
                         "true_system": true_label,
                         "false_swap": wrong_label,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -337,7 +338,7 @@ class AnatomyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="anatomy",
                     relation_type="in_region",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -346,6 +347,7 @@ class AnatomyGenerator(BaseGenerator):
                         "structure": struct.name,
                         "true_region": true_label,
                         "false_swap": wrong_label,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -398,7 +400,7 @@ class AnatomyGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="anatomy",
                     relation_type="is_structure_type",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -407,6 +409,7 @@ class AnatomyGenerator(BaseGenerator):
                         "structure": struct.name,
                         "true_type": true_label,
                         "false_swap": wrong_label,
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -485,7 +488,7 @@ class AnatomyGenerator(BaseGenerator):
                         pair_id=pair_id,
                         domain="anatomy",
                         relation_type="same_region",
-                        difficulty=difficulty,
+                        difficulty="mixed",
                         semantic_distance=None,
                         generator=self.name,
                         template_id=template.id,
@@ -495,6 +498,7 @@ class AnatomyGenerator(BaseGenerator):
                             "structure_b": b.name,
                             "true_region": region_label,
                             "false_swap": c.name,
+                            "swap_distance": difficulty,
                         },
                     )
 
@@ -574,7 +578,7 @@ class AnatomyGenerator(BaseGenerator):
                         pair_id=pair_id,
                         domain="anatomy",
                         relation_type="same_system",
-                        difficulty=difficulty,
+                        difficulty="mixed",
                         semantic_distance=None,
                         generator=self.name,
                         template_id=template.id,
@@ -584,5 +588,6 @@ class AnatomyGenerator(BaseGenerator):
                             "structure_b": b.name,
                             "true_system": system_label,
                             "false_swap": c.name,
+                            "swap_distance": difficulty,
                         },
                     )

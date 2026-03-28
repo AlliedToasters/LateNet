@@ -365,7 +365,7 @@ class ChemistryGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="chemistry",
                     relation_type="symbol_of",
-                    difficulty=difficulty,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -375,6 +375,7 @@ class ChemistryGenerator(BaseGenerator):
                         "true_symbol": symbol,
                         "false_symbol": swap_el["symbol"],
                         "atomic_number": int(el_row["atomic_number"]),
+                        "swap_distance": difficulty,
                     },
                 )
 
@@ -436,7 +437,7 @@ class ChemistryGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="chemistry",
                     relation_type="member_of_group",
-                    difficulty=Difficulty.HARD.value,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -446,6 +447,7 @@ class ChemistryGenerator(BaseGenerator):
                         "true_series": series_label,
                         "false_series": hard_series,
                         "atomic_number": int(el_row["atomic_number"]),
+                        "swap_distance": Difficulty.HARD.value,
                     },
                 )
                 swaps_emitted += 1
@@ -465,7 +467,7 @@ class ChemistryGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="chemistry",
                     relation_type="member_of_group",
-                    difficulty=Difficulty.EASY.value,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -475,6 +477,7 @@ class ChemistryGenerator(BaseGenerator):
                         "true_series": series_label,
                         "false_series": easy_series,
                         "atomic_number": int(el_row["atomic_number"]),
+                        "swap_distance": Difficulty.EASY.value,
                     },
                 )
 
@@ -515,7 +518,7 @@ class ChemistryGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="chemistry",
                 relation_type="state_at_room_temp",
-                difficulty=Difficulty.HARD.value,
+                difficulty="mixed",
                 semantic_distance=None,
                 generator=self.name,
                 template_id=template.id,
@@ -525,6 +528,7 @@ class ChemistryGenerator(BaseGenerator):
                     "true_state": true_state,
                     "false_state": hard_state,
                     "atomic_number": int(el_row["atomic_number"]),
+                    "swap_distance": Difficulty.HARD.value,
                 },
             )
 
@@ -547,7 +551,7 @@ class ChemistryGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="chemistry",
                 relation_type="state_at_room_temp",
-                difficulty=Difficulty.EASY.value,
+                difficulty="mixed",
                 semantic_distance=None,
                 generator=self.name,
                 template_id=template.id,
@@ -557,6 +561,7 @@ class ChemistryGenerator(BaseGenerator):
                     "true_state": true_state,
                     "false_state": easy_state,
                     "atomic_number": int(el_row["atomic_number"]),
+                    "swap_distance": Difficulty.EASY.value,
                 },
             )
 
@@ -604,7 +609,7 @@ class ChemistryGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="chemistry",
                 relation_type="in_block",
-                difficulty=difficulty,
+                difficulty="mixed",
                 semantic_distance=None,
                 generator=self.name,
                 template_id=template.id,
@@ -614,6 +619,7 @@ class ChemistryGenerator(BaseGenerator):
                     "true_block": true_block,
                     "false_block": wrong,
                     "atomic_number": int(el_row["atomic_number"]),
+                    "swap_distance": difficulty,
                 },
             )
 
@@ -662,7 +668,7 @@ class ChemistryGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="chemistry",
                     relation_type="atomic_number_greater",
-                    difficulty=diff,
+                    difficulty="mixed",
                     semantic_distance=None,
                     generator=self.name,
                     template_id=template.id,
@@ -672,6 +678,7 @@ class ChemistryGenerator(BaseGenerator):
                         "small_element": small,
                         "big_z": int(z_big),
                         "small_z": int(z_small),
+                        "swap_distance": diff,
                     },
                 )
 
@@ -728,7 +735,7 @@ class ChemistryGenerator(BaseGenerator):
                         pair_id=pair_id,
                         domain="chemistry",
                         relation_type="property_greater",
-                        difficulty=diff,
+                        difficulty="mixed",
                         semantic_distance=None,
                         generator=self.name,
                         template_id=template.id,
@@ -739,5 +746,6 @@ class ChemistryGenerator(BaseGenerator):
                             "property": prop_col,
                             "big_value": float(v_big),
                             "small_value": float(v_small),
+                            "swap_distance": diff,
                         },
                     )

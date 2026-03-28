@@ -295,15 +295,14 @@ class TestDifficulty:
     def test_difficulty_values(self):
         gen = _make_generator()
         pairs = list(gen.generate())
-        valid_diffs = {Difficulty.HARD.value, Difficulty.MEDIUM.value, Difficulty.EASY.value}
         for p in pairs:
-            assert p.difficulty in valid_diffs
+            assert p.difficulty == "mixed"
 
     def test_rank_difficulty_tiers(self):
         gen = _make_generator()
         pairs = list(gen._generate_rank())
-        hard = [p for p in pairs if p.difficulty == Difficulty.HARD.value]
-        easy = [p for p in pairs if p.difficulty == Difficulty.EASY.value]
+        hard = [p for p in pairs if p.gen_params.get("swap_distance") == Difficulty.HARD.value]
+        easy = [p for p in pairs if p.gen_params.get("swap_distance") == Difficulty.EASY.value]
         assert len(hard) > 0
         assert len(easy) > 0
 

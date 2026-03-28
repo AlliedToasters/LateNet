@@ -141,9 +141,9 @@ class TestContainment:
     def test_difficulty_tiers(self):
         gen = _make_generator()
         pairs = list(gen._generate_containment())
-        difficulties = {p.difficulty for p in pairs}
-        # Should have at least some of the difficulty levels
-        assert len(difficulties) >= 1
+        swap_distances = {p.gen_params.get("swap_distance") for p in pairs if p.gen_params}
+        # Should have at least some of the swap distance levels
+        assert len(swap_distances) >= 1
 
 
 class TestCardinalDirection:
@@ -202,7 +202,7 @@ class TestPopulationMagnitude:
         pairs = list(gen._generate_population())
         # All pairs should have >3x ratio
         for p in pairs:
-            assert p.difficulty in (Difficulty.HARD.value, Difficulty.MEDIUM.value, Difficulty.EASY.value)
+            assert p.difficulty == "mixed"
 
 
 class TestAreaMagnitude:
