@@ -963,9 +963,11 @@ _AUTHORSHIP_DOMAINS: dict[str, dict] = {
     "literature": {
         "creator_prop": "P50",
         "work_types": {
-            "Q7725634": "novel",
+            "Q7725634": "work",        # literary work (generic fallback)
+            "Q8261": "novel",
             "Q25379": "play",
             "Q5185279": "poem",
+            "Q37484": "sonnet",
             "Q49084": "short story",
             "Q35760": "essay",
         },
@@ -1187,8 +1189,12 @@ def load_authors_and_works(
         df["science_attribution"] = False
     df["science_attribution"] = df["science_attribution"].fillna(False)
 
-    # Deduplicate: one row per (work_qid, author_qid) pair
-    df = df.drop_duplicates(subset=["work_qid", "author_qid"], keep="first").reset_index(drop=True)
+    # Deduplicate: one row per (work_qid, author_qid) pair.
+    # Prefer the most specific work_type (anything over generic "work").
+    df["_generic_type"] = df["work_type"] == "work"
+    df = df.sort_values("_generic_type", kind="stable").drop_duplicates(
+        subset=["work_qid", "author_qid"], keep="first",
+    ).drop(columns=["_generic_type"]).reset_index(drop=True)
 
     # Filter out entries whose names look like QIDs (no label resolved)
     df = df[~df["author_name"].str.match(r"^Q\d+$", na=False)].copy()
