@@ -130,6 +130,36 @@ def negate_statement(statement: str) -> str:
     s = re.sub(r"\bis part of\b", "is not part of", s, count=1)
     if s != original:
         return s
+    s = re.sub(r"\bis closer to\b", "is not closer to", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis larger in area\b", "is not larger in area", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis larger than\b", "is not larger than", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis greater than\b", "is not greater than", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis found in\b", "is not found in", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis in the\b", "is not in the", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis classified under\b", "is not classified under", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis represented by\b", "is not represented by", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis brighter than\b", "is not brighter than", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bis (north|south|east|west) of\b", r"is not \1 of", s, count=1)
+    if s != original:
+        return s
 
     # --- "are" patterns (siblings, contemporaries) ---
     s = re.sub(r"\bare both\b", "are not both", s, count=1)
@@ -141,9 +171,24 @@ def negate_statement(statement: str) -> str:
     s = re.sub(r"\bare antonyms\b", "are not antonyms", s, count=1)
     if s != original:
         return s
+    s = re.sub(r"\bare coprime\b", "are not coprime", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bare classified as\b", "are not classified as", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bare a\b", "are not a", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bare an\b", "are not an", s, count=1)
+    if s != original:
+        return s
 
     # --- Verb patterns (temporal, authorship) ---
     s = re.sub(r"\bwas born before\b", "was not born before", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bwas born in\b", "was not born in", s, count=1)
     if s != original:
         return s
     s = re.sub(r"\bwas born earlier\b", "was not born earlier", s, count=1)
@@ -159,6 +204,12 @@ def negate_statement(statement: str) -> str:
     if s != original:
         return s
     s = re.sub(r"\bwas painted by\b", "was not painted by", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bwas alive\b", "was not alive", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bwas an\b", "was not an", s, count=1)
     if s != original:
         return s
     s = re.sub(r"\bwas a\b", "was not a", s, count=1)
@@ -178,7 +229,19 @@ def negate_statement(statement: str) -> str:
     s = re.sub(r"\bpainted\b", "did not paint", s, count=1)
     if s != original:
         return s
+    s = re.sub(r"\bcreated\b", "did not create", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bworked as\b", "did not work as", s, count=1)
+    if s != original:
+        return s
     s = re.sub(r"\bpredates\b", "does not predate", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bpostdates\b", "does not postdate", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bpreceded\b", "did not precede", s, count=1)
     if s != original:
         return s
     s = re.sub(r"\bexceeds\b", "does not exceed", s, count=1)
@@ -187,8 +250,53 @@ def negate_statement(statement: str) -> str:
     s = re.sub(r"\bcovers more\b", "does not cover more", s, count=1)
     if s != original:
         return s
+    s = re.sub(r"\borbits\b", "does not orbit", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\brevolves around\b", "does not revolve around", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bcontains\b", "does not contain", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\btranslates to\b", "does not translate to", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bequals\b", "does not equal", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bdivides\b", "does not divide", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bexists as\b", "does not exist as", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bcomes from\b", "does not come from", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bappears brighter\b", "does not appear brighter", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bmeans\b", "does not mean", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bdied (before|after)\b", r"did not die \1", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\btook place\b", "did not take place", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bhappened\b", "did not happen", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\blived at\b", "did not live at", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\blived before\b", "did not live before", s, count=1)
+    if s != original:
+        return s
 
-    # --- "belongs to" / "has" / "lies" patterns ---
+    # --- "belongs to" / "has" / "lies" / "share" patterns ---
     s = re.sub(r"\bbelongs to\b", "does not belong to", s, count=1)
     if s != original:
         return s
@@ -196,6 +304,18 @@ def negate_statement(statement: str) -> str:
     if s != original:
         return s
     s = re.sub(r"\blies to the\b", "does not lie to the", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bcan be found\b", "cannot be found", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bcan be classified\b", "cannot be classified", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bshare a\b", "do not share a", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bhave the greatest\b", "do not have the greatest", s, count=1)
     if s != original:
         return s
     s = re.sub(r"\bhas a\b", "does not have a", s, count=1)
@@ -211,6 +331,17 @@ def negate_statement(statement: str) -> str:
     if s != original:
         return s
     s = re.sub(r"\boccurred in\b", "did not occur in", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\boccurred before\b", "did not occur before", s, count=1)
+    if s != original:
+        return s
+
+    # --- General copula catch-all (handles remaining "is"/"are" patterns) ---
+    s = re.sub(r"\bis\b", "is not", s, count=1)
+    if s != original:
+        return s
+    s = re.sub(r"\bare\b", "are not", s, count=1)
     if s != original:
         return s
 

@@ -23,7 +23,7 @@ from latenet.datasources.wikidata import (
 )
 from latenet.generators.base import BaseGenerator
 from latenet.sanitize import render_template
-from latenet.types import ContrastivePair, Difficulty, NegationStrategy
+from latenet.types import ContrastivePair, NegationStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -103,13 +103,13 @@ def _make_pair_id(parts: list[str]) -> str:
 
 
 def _year_gap_difficulty(gap: int) -> str:
-    """Map absolute year gap to difficulty tier."""
+    """Map absolute year gap to a descriptive label (stashed in gen_params)."""
     if gap < 50:
-        return Difficulty.HARD.value
+        return "close"
     elif gap < 200:
-        return Difficulty.MEDIUM.value
+        return "moderate"
     else:
-        return Difficulty.EASY.value
+        return "distant"
 
 
 # ---------------------------------------------------------------------------
@@ -301,8 +301,6 @@ class TemporalGenerator(BaseGenerator):
             true_stmt = render_template(template.pattern,eventA=name_a, eventB=name_b)
             false_stmt = render_template(template.pattern,eventA=name_b, eventB=name_a)
 
-            difficulty = _year_gap_difficulty(gap)
-
             pair_id = _make_pair_id([
                 "temp", "event_order", qid_a, qid_b, template.id,
             ])
@@ -313,7 +311,7 @@ class TemporalGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="temporal",
                 relation_type="happened_before",
-                difficulty=difficulty,
+                difficulty="mixed",
                 semantic_distance=gap,
                 generator=self.name,
                 template_id=template.id,
@@ -326,6 +324,7 @@ class TemporalGenerator(BaseGenerator):
                     "year_a": year_a,
                     "year_b": year_b,
                     "gap_years": gap,
+                    "gap_bucket": _year_gap_difficulty(gap),
                 },
             )
 
@@ -378,8 +377,6 @@ class TemporalGenerator(BaseGenerator):
             true_stmt = render_template(template.pattern,personA=name_a, personB=name_b)
             false_stmt = render_template(template.pattern,personA=name_b, personB=name_a)
 
-            difficulty = _year_gap_difficulty(gap)
-
             pair_id = _make_pair_id([
                 "temp", "birth_order", qid_a, qid_b, template.id,
             ])
@@ -390,7 +387,7 @@ class TemporalGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="temporal",
                 relation_type="born_before",
-                difficulty=difficulty,
+                difficulty="mixed",
                 semantic_distance=gap,
                 generator=self.name,
                 template_id=template.id,
@@ -403,6 +400,7 @@ class TemporalGenerator(BaseGenerator):
                     "year_a": year_a,
                     "year_b": year_b,
                     "gap_years": gap,
+                    "gap_bucket": _year_gap_difficulty(gap),
                 },
             )
 
@@ -477,12 +475,6 @@ class TemporalGenerator(BaseGenerator):
                 false_stmt = render_template(template.pattern,event=name, century=false_century)
 
             century_gap = abs(century - false_century_num)
-            if century_gap <= 1:
-                difficulty = Difficulty.HARD.value
-            elif century_gap <= 3:
-                difficulty = Difficulty.MEDIUM.value
-            else:
-                difficulty = Difficulty.EASY.value
 
             pair_id = _make_pair_id([
                 "temp", "century", entity_type, qid,
@@ -495,7 +487,7 @@ class TemporalGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="temporal",
                 relation_type="occurred_in_century",
-                difficulty=difficulty,
+                difficulty="mixed",
                 semantic_distance=century_gap,
                 generator=self.name,
                 template_id=template.id,
@@ -582,8 +574,6 @@ class TemporalGenerator(BaseGenerator):
                 )
                 strategy = NegationStrategy.DISTANT_SWAP.value
 
-            difficulty = _year_gap_difficulty(gap)
-
             pair_id = _make_pair_id([
                 "temp", "era", p_qid, e_qid, template.id,
             ])
@@ -594,7 +584,7 @@ class TemporalGenerator(BaseGenerator):
                 pair_id=pair_id,
                 domain="temporal",
                 relation_type="lived_before_event",
-                difficulty=difficulty,
+                difficulty="mixed",
                 semantic_distance=gap,
                 generator=self.name,
                 template_id=template.id,
@@ -678,7 +668,7 @@ class TemporalGenerator(BaseGenerator):
                     pair_id=pair_id,
                     domain="temporal",
                     relation_type="were_contemporaries",
-                    difficulty=Difficulty.MEDIUM.value,
+                    difficulty="mixed",
                     semantic_distance=overlap,
                     generator=self.name,
                     template_id=template.id,

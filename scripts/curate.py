@@ -2,7 +2,7 @@
 
 Reads the ledger, selects clean (uncontested) rows, and produces a
 balanced dataset with even representation across generators and
-difficulty tiers.
+relation types.
 
 Usage:
     latenet-curate --rows-per-stratum 50 --output latenet_v1.parquet
@@ -31,7 +31,7 @@ def main():
     )
     parser.add_argument(
         "--rows-per-stratum", type=int, required=True,
-        help="Target number of pairs per (generator, difficulty) cell",
+        help="Target number of pairs per (generator, relation_type) cell",
     )
     parser.add_argument(
         "--generators", nargs="+", default=None,
@@ -95,25 +95,30 @@ def main():
     valid_pairs = pair_groups.filter(lambda g: len(g) in (2, 4))
 
     # Get unique pairs with their stratum info
-    pair_meta = valid_pairs.groupby("pair_id").first()[["generator", "difficulty"]].reset_index()
+    pair_meta = valid_pairs.groupby("pair_id").first()[["generator", "relation_type"]].reset_index()
 
-    # Sample per stratum
+    # Sample per stratum: (generator, relation_type)
     sampled_pair_ids: list[str] = []
 
-    for (gen, diff), group in pair_meta.groupby(["generator", "difficulty"]):
+    for (gen, rel), group in pair_meta.groupby(["generator", "relation_type"]):
         target: int = generator_caps.get(gen, args.rows_per_stratum)
         available = len(group)
         n = min(target, available)
         selected = group.sample(n=n, random_state=args.seed)
         sampled_pair_ids.extend(selected["pair_id"].tolist())
         status = "FULL" if n >= target else f"SHORT ({available}/{target})"
-        logger.info("  %s/%s: %d pairs [%s]", gen, diff or "(none)", n, status)
+        logger.info("  %s/%s: %d pairs [%s]", gen, rel, n, status)
 
     # Pull the full rows for selected pairs
     curated = valid_pairs[valid_pairs["pair_id"].isin(sampled_pair_ids)].copy()
 
+    # Drop difficulty column from published view — it's kept in the ledger
+    # for backward compatibility but is not a meaningful dataset axis
+    if "difficulty" in curated.columns:
+        curated = curated.drop(columns=["difficulty"])
+
     # Sort for clean output
-    curated = curated.sort_values(["generator", "difficulty", "pair_id", "label"]).reset_index(drop=True)
+    curated = curated.sort_values(["generator", "relation_type", "pair_id", "label"]).reset_index(drop=True)
 
     # Write
     output_path = Path(args.output)
@@ -121,7 +126,7 @@ def main():
     curated.to_parquet(output_path, index=False)
 
     n_pairs = curated["pair_id"].nunique()
-    n_strata = curated.groupby(["generator", "difficulty"]).ngroups
+    n_strata = curated.groupby(["generator", "relation_type"]).ngroups
     logger.info(
         "Curated dataset: %d pairs (%d rows) across %d strata -> %s",
         n_pairs, len(curated), n_strata, output_path,

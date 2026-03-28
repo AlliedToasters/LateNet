@@ -222,22 +222,22 @@ class TestCenturyLabel:
 
 
 class TestYearGapDifficulty:
-    def test_hard(self):
-        assert _year_gap_difficulty(25) == Difficulty.HARD.value
+    def test_close(self):
+        assert _year_gap_difficulty(25) == "close"
 
-    def test_medium(self):
-        assert _year_gap_difficulty(100) == Difficulty.MEDIUM.value
+    def test_moderate(self):
+        assert _year_gap_difficulty(100) == "moderate"
 
-    def test_easy(self):
-        assert _year_gap_difficulty(500) == Difficulty.EASY.value
+    def test_distant(self):
+        assert _year_gap_difficulty(500) == "distant"
 
-    def test_boundary_hard_medium(self):
-        assert _year_gap_difficulty(49) == Difficulty.HARD.value
-        assert _year_gap_difficulty(50) == Difficulty.MEDIUM.value
+    def test_boundary_close_moderate(self):
+        assert _year_gap_difficulty(49) == "close"
+        assert _year_gap_difficulty(50) == "moderate"
 
-    def test_boundary_medium_easy(self):
-        assert _year_gap_difficulty(199) == Difficulty.MEDIUM.value
-        assert _year_gap_difficulty(200) == Difficulty.EASY.value
+    def test_boundary_moderate_distant(self):
+        assert _year_gap_difficulty(199) == "moderate"
+        assert _year_gap_difficulty(200) == "distant"
 
 
 # --- Generator tests ---
@@ -377,19 +377,20 @@ class TestTemplateDiversity:
 
 
 class TestDifficulty:
-    def test_difficulty_values(self):
+    def test_difficulty_is_mixed(self):
         gen = _make_generator()
         pairs = list(gen.generate())
-        valid_diffs = {Difficulty.HARD.value, Difficulty.MEDIUM.value, Difficulty.EASY.value}
         for p in pairs:
-            assert p.difficulty in valid_diffs
+            assert p.difficulty == "mixed"
 
-    def test_difficulty_tiers_present(self):
+    def test_gap_bucket_in_gen_params(self):
         gen = _make_generator()
         pairs = list(gen.generate())
-        diffs = {p.difficulty for p in pairs}
-        # With our mock data spanning centuries, we should get multiple tiers
-        assert len(diffs) >= 2
+        # Pairs with gap_bucket in gen_params should have descriptive labels
+        valid_buckets = {"close", "moderate", "distant"}
+        for p in pairs:
+            if p.gen_params and "gap_bucket" in p.gen_params:
+                assert p.gen_params["gap_bucket"] in valid_buckets
 
 
 class TestToRows:

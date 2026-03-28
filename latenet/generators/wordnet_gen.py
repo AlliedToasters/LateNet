@@ -51,7 +51,11 @@ class WordNetGenerator(BaseGenerator):
         super().__init__(seed=seed, max_pairs=max_pairs)
         self.max_depth = max_depth
         self.min_examples_per_domain = min_examples_per_domain
-        self.rel_types = rel_types
+        # Exclude meronymy — noisy data, 35% contest rate, low signal
+        if rel_types is None:
+            self.rel_types = {RelationshipType.HYPERNYMY, RelationshipType.ANTONYMY, RelationshipType.SIBLING}
+        else:
+            self.rel_types = rel_types - {RelationshipType.MERONYMY}
         self.max_false_per_true = max_false_per_true
         self.min_lemma_frequency = min_lemma_frequency
         self.max_pairs_per_source = max_pairs_per_source
@@ -61,7 +65,7 @@ class WordNetGenerator(BaseGenerator):
         return "wordnet"
 
     def relation_types(self) -> list[str]:
-        return ["hypernymy", "meronymy", "antonymy", "sibling"]
+        return ["hypernymy", "antonymy", "sibling"]
 
     def domains(self) -> list[str]:
         # Domains are discovered dynamically during generation

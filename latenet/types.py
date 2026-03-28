@@ -90,7 +90,7 @@ class ContrastivePair:
             "generator": self.generator,
             "template_id": self.template_id,
             "negation_strategy": self.negation_strategy,
-            "gen_params": json.dumps(self.gen_params) if self.gen_params is not None else None,
+            "gen_params": json.dumps(self.gen_params, default=str) if self.gen_params is not None else None,
         }
         true_row = {
             "id": f"{self.pair_id}_true",
