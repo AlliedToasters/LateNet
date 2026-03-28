@@ -6,8 +6,12 @@ can be traced back to the exact code version that produced them.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import time
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def get_git_hash() -> str:
@@ -46,3 +50,29 @@ def get_git_dirty() -> bool:
 def get_timestamp() -> str:
     """Return the current UTC timestamp in ISO 8601 format."""
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def get_wikidata_hash() -> str | None:
+    """Return the wikistash snapshot hash, or None if wikistash is unavailable."""
+    try:
+        from latenet.datasources.wikidata import _get_wikistash
+        stash = _get_wikistash()
+        if stash is not None:
+            return stash.snapshot_hash()
+    except Exception as e:
+        logger.debug("Could not get wikidata snapshot hash: %s", e)
+    return None
+
+
+def get_naturalearth_version() -> str | None:
+    """Return the Natural Earth data version from the cached VERSION.txt."""
+    version_file = (
+        Path.home() / ".cache" / "latenet" / "naturalearth"
+        / "countries" / "ne_10m_admin_0_countries.VERSION.txt"
+    )
+    try:
+        if version_file.exists():
+            return version_file.read_text().strip()
+    except OSError:
+        pass
+    return None

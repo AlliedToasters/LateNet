@@ -359,6 +359,7 @@ class BiologyGenerator(BaseGenerator):
                         negation_strategy=strategy,
                         gen_params={
                             "organism": org_name,
+                            "organism_idx": int(idx),
                             "rank": rank_label,
                             "true_taxon": true_taxon,
                             "false_taxon": swap_taxon,
@@ -522,8 +523,11 @@ class BiologyGenerator(BaseGenerator):
                     negation_strategy=NegationStrategy.SIBLING_SWAP.value,
                     gen_params={
                         "organism_a": name_a,
+                        "organism_a_idx": int(idx_a),
                         "organism_b": name_b,
+                        "organism_b_idx": int(idx_b),
                         "false_organism": name_c,
+                        "false_organism_idx": int(idx_c),
                         "rank": rank_label,
                         "taxon": taxon_name,
                         "lowest_common_rank": lcr,

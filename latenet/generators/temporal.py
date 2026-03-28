@@ -289,6 +289,7 @@ class TemporalGenerator(BaseGenerator):
             # Ensure A is before B
             if year_a > year_b:
                 row_a, row_b = row_b, row_a
+                idx_a, idx_b = idx_b, idx_a
                 year_a, year_b = year_b, year_a
 
             name_a = str(row_a["name"])
@@ -319,7 +320,9 @@ class TemporalGenerator(BaseGenerator):
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
                 gen_params={
                     "event_a": name_a,
+                    "event_a_idx": int(idx_a),
                     "event_b": name_b,
+                    "event_b_idx": int(idx_b),
                     "year_a": year_a,
                     "year_b": year_b,
                     "gap_years": gap,
@@ -363,6 +366,7 @@ class TemporalGenerator(BaseGenerator):
             # Ensure A is born before B
             if year_a > year_b:
                 row_a, row_b = row_b, row_a
+                idx_a, idx_b = idx_b, idx_a
                 year_a, year_b = year_b, year_a
 
             name_a = str(row_a["name"])
@@ -393,7 +397,9 @@ class TemporalGenerator(BaseGenerator):
                 negation_strategy=NegationStrategy.REVERSE_RELATION.value,
                 gen_params={
                     "person_a": name_a,
+                    "person_a_idx": int(idx_a),
                     "person_b": name_b,
+                    "person_b_idx": int(idx_b),
                     "year_a": year_a,
                     "year_b": year_b,
                     "gap_years": gap,
@@ -496,6 +502,7 @@ class TemporalGenerator(BaseGenerator):
                 negation_strategy=NegationStrategy.DISTANT_SWAP.value,
                 gen_params={
                     "entity": name,
+                    "entity_idx": int(idx),
                     "entity_type": entity_type,
                     "year": year,
                     "true_century": century,
@@ -594,7 +601,9 @@ class TemporalGenerator(BaseGenerator):
                 negation_strategy=strategy,
                 gen_params={
                     "person": person_name,
+                    "person_idx": int(p_idx),
                     "event": event_name,
+                    "event_idx": int(e_idx),
                     "death_year": death_year,
                     "event_year": event_year,
                     "gap_years": gap,
@@ -676,7 +685,9 @@ class TemporalGenerator(BaseGenerator):
                     negation_strategy=NegationStrategy.DISTANT_SWAP.value,
                     gen_params={
                         "person_a": name_a,
+                        "person_a_idx": int(idx_a),
                         "person_b": name_b,
+                        "person_b_idx": int(idx_b),
                         "birth_a": birth_a,
                         "death_a": death_a,
                         "birth_b": birth_b,

@@ -361,6 +361,7 @@ class AuthorshipGenerator(BaseGenerator):
                     neg_synset=swap["author_qid"],
                     gen_params={
                         "work": work_name,
+                        "work_idx": int(idx),
                         "author": author_name,
                         "false_author": swap_author,
                         "creative_domain": domain,
@@ -463,7 +464,9 @@ class AuthorshipGenerator(BaseGenerator):
                 gen_params={
                     "author": author_name,
                     "true_work": true_work,
+                    "true_work_idx": int(true_idx),
                     "false_work": false_work,
+                    "false_work_idx": int(false_idx),
                     "role": role,
                 },
             )
@@ -533,6 +536,7 @@ class AuthorshipGenerator(BaseGenerator):
                 source_synset=row["author_qid"],
                 gen_params={
                     "author": author_name,
+                    "author_idx": int(idx),
                     "true_role": true_role,
                     "false_role": false_role,
                 },

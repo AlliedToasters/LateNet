@@ -13,7 +13,7 @@ Layout::
 Each row in the ledger carries:
 - All generation columns (statement, label, pair_id, generator, difficulty, ...)
 - Validation columns (llama_agrees, sonnet_agrees, opus_agrees, contested, ...)
-- Provenance columns (git_hash, git_dirty, generated_at, batch_id)
+- Provenance columns (git_hash, git_dirty, generated_at, batch_id, wikidata_hash, naturalearth_version)
 """
 
 from __future__ import annotations
@@ -24,7 +24,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from .provenance import get_git_dirty, get_git_hash, get_timestamp
+from .provenance import (
+    get_git_dirty,
+    get_git_hash,
+    get_naturalearth_version,
+    get_timestamp,
+    get_wikidata_hash,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +53,8 @@ def stamp_provenance(df: pd.DataFrame, seed: int = 0) -> pd.DataFrame:
     - git_dirty: whether the working tree had uncommitted changes
     - generated_at: UTC ISO 8601 timestamp
     - batch_id: deterministic hash of (git_hash, timestamp, seed)
+    - wikidata_hash: wikistash snapshot hash (None if unavailable)
+    - naturalearth_version: Natural Earth data version (None if unavailable)
     """
     git_hash = get_git_hash()
     git_dirty = get_git_dirty()
@@ -58,6 +66,8 @@ def stamp_provenance(df: pd.DataFrame, seed: int = 0) -> pd.DataFrame:
     out["git_dirty"] = git_dirty
     out["generated_at"] = timestamp
     out["batch_id"] = batch_id
+    out["wikidata_hash"] = get_wikidata_hash()
+    out["naturalearth_version"] = get_naturalearth_version()
     return out
 
 
