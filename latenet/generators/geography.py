@@ -111,10 +111,10 @@ class GeographyGenerator(BaseGenerator):
         max_pairs: int | None = None,
         min_country_pop: int = 100_000,
         min_city_pop: int = 50_000,
-        min_proximity_pop: int = 200_000,
+        min_proximity_pop: int = 1_000_000,
         lat_margin: float = 5.0,
         lon_margin: float = 10.0,
-        distance_ratio: float = 3.0,
+        distance_ratio: float = 5.0,
         magnitude_ratio: float = 3.0,
         max_false_per_true: int = 2,
     ):

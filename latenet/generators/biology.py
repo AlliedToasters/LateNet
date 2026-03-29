@@ -86,7 +86,7 @@ _RANK_DISPLAY = {
 
 
 def _make_pair_id(parts: list[str]) -> str:
-    key = ":".join(parts)
+    key = ":".join(str(p) for p in parts)
     return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
