@@ -39,9 +39,10 @@ def sibling_swap(
     relationship: Relationship,
     template: Template,
     rng: random.Random,
+    coherence_scorer: object | None = None,
 ) -> tuple[str, NegationStrategy, Synset] | None:
     """Generate false statement by swapping target with a sibling (hard)."""
-    neg = pick_negation_synset(relationship.source, relationship.target, Difficulty.HARD, rng)
+    neg = pick_negation_synset(relationship.source, relationship.target, Difficulty.HARD, rng, coherence_scorer=coherence_scorer)
     if neg is None:
         return None
     stmt = _swap_target_name(relationship, template, neg)
@@ -52,9 +53,10 @@ def cousin_swap(
     relationship: Relationship,
     template: Template,
     rng: random.Random,
+    coherence_scorer: object | None = None,
 ) -> tuple[str, NegationStrategy, Synset] | None:
     """Generate false statement by swapping target with a cousin synset (medium)."""
-    neg = pick_negation_synset(relationship.source, relationship.target, Difficulty.MEDIUM, rng)
+    neg = pick_negation_synset(relationship.source, relationship.target, Difficulty.MEDIUM, rng, coherence_scorer=coherence_scorer)
     if neg is None:
         return None
     stmt = _swap_target_name(relationship, template, neg)
@@ -65,9 +67,10 @@ def distant_swap(
     relationship: Relationship,
     template: Template,
     rng: random.Random,
+    coherence_scorer: object | None = None,
 ) -> tuple[str, NegationStrategy, Synset] | None:
     """Generate false statement by swapping target with a distant synset (easy)."""
-    neg = pick_negation_synset(relationship.source, relationship.target, Difficulty.EASY, rng)
+    neg = pick_negation_synset(relationship.source, relationship.target, Difficulty.EASY, rng, coherence_scorer=coherence_scorer)
     if neg is None:
         return None
     stmt = _swap_target_name(relationship, template, neg)
@@ -386,20 +389,21 @@ def apply_negation(
     template: Template,
     true_statement: str,
     rng: random.Random,
+    coherence_scorer: object | None = None,
 ) -> list[tuple[str, NegationStrategy, Synset | None]]:
     """Apply all applicable negation strategies. Returns list of (statement, strategy, neg_synset)."""
     results = []
 
     if template.rel_type in (RelationshipType.HYPERNYMY, RelationshipType.MERONYMY):
-        sib = sibling_swap(relationship, template, rng)
+        sib = sibling_swap(relationship, template, rng, coherence_scorer=coherence_scorer)
         if sib:
             results.append(sib)
 
-        cuz = cousin_swap(relationship, template, rng)
+        cuz = cousin_swap(relationship, template, rng, coherence_scorer=coherence_scorer)
         if cuz:
             results.append(cuz)
 
-        dist = distant_swap(relationship, template, rng)
+        dist = distant_swap(relationship, template, rng, coherence_scorer=coherence_scorer)
         if dist:
             results.append(dist)
 

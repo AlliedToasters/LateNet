@@ -61,6 +61,7 @@ class WordNetGenerator(BaseGenerator):
         max_false_per_true: int = 3,
         min_lemma_frequency: int = 0,
         max_pairs_per_source: int = 3,
+        use_ndif_coherence: bool = False,
     ):
         super().__init__(seed=seed, max_pairs=max_pairs)
         self.max_depth = max_depth
@@ -73,6 +74,12 @@ class WordNetGenerator(BaseGenerator):
         self.max_false_per_true = max_false_per_true
         self.min_lemma_frequency = min_lemma_frequency
         self.max_pairs_per_source = max_pairs_per_source
+
+        self._coherence_scorer = None
+        if use_ndif_coherence:
+            from latenet.wordnet.coherence import CoherenceScorer
+            self._coherence_scorer = CoherenceScorer()
+            logger.info("WordNet generator using NDIF coherence scoring")
 
     @property
     def name(self) -> str:
@@ -123,7 +130,7 @@ class WordNetGenerator(BaseGenerator):
             slots, synset_map = slot_values_for_relationship(template, rel)
             true_statement = render(template, slots, synset_map=synset_map)
 
-            negations = apply_negation(rel, template, true_statement, self.rng)
+            negations = apply_negation(rel, template, true_statement, self.rng, coherence_scorer=self._coherence_scorer)
             if len(negations) > self.max_false_per_true:
                 negations = negations[: self.max_false_per_true]
 

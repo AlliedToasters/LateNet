@@ -287,6 +287,11 @@ def main():
              "Negated rows are mechanically produced (insert 'not', flip label) "
              "and inherit the validation status of the original.",
     )
+    parser.add_argument(
+        "--ndif-coherence", action="store_true",
+        help="Use NDIF logit-guided coherence scoring for WordNet false statement "
+             "selection. Requires NDIF_API_KEY. Uses Llama 70B base model.",
+    )
     args = parser.parse_args()
 
     legs = set(args.legs)
@@ -320,6 +325,8 @@ def main():
         if gen_name == "wordnet":
             kwargs["max_depth"] = 5
             kwargs["max_false_per_true"] = 3
+            if args.ndif_coherence:
+                kwargs["use_ndif_coherence"] = True
 
         gen = gen_cls(**kwargs)
         logger.info("Running %s generator (seed=%d, max_pairs=%d)...", gen_name, args.seed, args.max_pairs)

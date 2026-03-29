@@ -163,13 +163,51 @@ def _distant_synset(
     return _frequency_weighted_choice(pool, rng, flatten=True) if pool else None
 
 
+def _distant_pool(
+    synset: Synset, source: Synset | None = None,
+) -> list[Synset]:
+    """Build the candidate pool for distant_swap without selecting.
+
+    Same filtering as _distant_synset (category-level, physical_entity,
+    different root tree) but returns the full pool for coherence scoring.
+    """
+    exclude_lemmas: set[str] = set()
+    if source is not None:
+        exclude_lemmas = {l.name().lower() for l in source.lemmas()}
+    exclude_lemmas |= {l.name().lower() for l in synset.lemmas()}
+
+    def _valid(s: Synset) -> bool:
+        return (
+            _is_category_level(s)
+            and s.name() != synset.name()
+            and not exclude_lemmas & {l.name().lower() for l in s.lemmas()}
+        )
+
+    source_roots = {r.name() for r in synset.root_hypernyms()}
+    by_root = _synsets_by_root()
+    other_roots = [k for k in by_root if k not in source_roots]
+
+    if not other_roots:
+        return [s for ss in by_root.values() for s in ss if _valid(s)]
+
+    pool = []
+    for root in other_roots:
+        pool.extend(s for s in by_root[root] if _valid(s))
+    return pool
+
+
 def pick_negation_synset(
     source: Synset,
     target: Synset,
     difficulty: Difficulty,
     rng: random.Random,
+    coherence_scorer: object | None = None,
 ) -> Synset | None:
-    """Pick a replacement synset for the false statement at the desired difficulty."""
+    """Pick a replacement synset for the false statement at the desired difficulty.
+
+    When coherence_scorer is provided, candidates are scored by NDIF logit
+    plausibility and sampled via softmax weighting instead of frequency weighting.
+    """
     source_lemmas = {l.name().lower() for l in source.lemmas()}
 
     def _no_overlap(pool: list) -> list:
@@ -185,13 +223,29 @@ def pick_negation_synset(
     elif difficulty == Difficulty.MEDIUM:
         pool = _no_overlap(_cousins_of(target))
     elif difficulty == Difficulty.EASY:
-        return _distant_synset(target, rng, source=source)
+        if coherence_scorer is None:
+            return _distant_synset(target, rng, source=source)
+        # Build distant pool manually so we can route through scorer
+        pool = _distant_pool(target, source)
+        if not pool:
+            return _distant_synset(target, rng, source=source)
     else:
         return None
 
     if not pool:
         return None
 
+    # --- Coherence-scored path (NDIF logit weighting) ---
+    if coherence_scorer is not None:
+        from latenet.wordnet.coherence import softmax_sample
+
+        source_word = source.lemma_names()[0].replace("_", " ")
+        scored = coherence_scorer.score_candidates(source_word, pool)
+        if not scored:
+            return None
+        return softmax_sample(scored, rng)
+
+    # --- Legacy path (frequency + Wu-Palmer heuristics) ---
     # Wu-Palmer coherence: keep only replacements that are taxonomically
     # close enough to the source that "Source is a Replacement" sounds
     # plausible (even if false). Filters out awkward swaps like
