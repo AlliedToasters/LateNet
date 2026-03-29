@@ -79,13 +79,23 @@ def _cousins_of(synset: Synset) -> list[Synset]:
     return cousins
 
 
-def _is_category_level(synset: Synset) -> bool:
-    """True if synset is a general category (has hyponyms and attested lemmas).
+_MAX_CATEGORY_DEPTH = 5
 
-    Filters out leaf synsets like 'Sioux.n.01' or 'sixteen.n.01' that produce
-    nonsensical false statements when used as categories in "X is a Y" templates.
+
+def _is_category_level(synset: Synset) -> bool:
+    """True if synset is a general category suitable for "X is a Y" templates.
+
+    Requires: attested in corpus, has hyponyms, and shallow enough in the
+    taxonomy to be a plausible category. Filters out specific nouns like
+    'boy.n.01' (depth=5), 'kitchen.n.01' (depth=8), 'shackle.n.01' (depth=8)
+    in favor of general categories like 'substance.n.01' (depth=3),
+    'quality.n.01' (depth=3), 'artifact.n.01' (depth=4).
     """
-    return len(synset.hyponyms()) >= 2 and _max_lemma_count(synset) > 0
+    return (
+        _max_lemma_count(synset) > 0
+        and len(synset.hyponyms()) >= 2
+        and synset.min_depth() <= _MAX_CATEGORY_DEPTH
+    )
 
 
 def _distant_synset(synset: Synset, rng: random.Random) -> Synset | None:
