@@ -1,7 +1,8 @@
-"""Wikidata SPARQL client with pagination, caching, and common knowledge filtering.
+"""Wikidata SPARQL client with pagination and common knowledge filtering.
 
 Provides reusable data loading for any generator backed by Wikidata.
-Caches query results as parquet in ~/.cache/latenet/wikidata/.
+Uses wikistash (local DuckDB clone) as primary backend; falls back to
+the remote SPARQL endpoint if wikistash is unavailable.
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-CACHE_ROOT = Path.home() / ".cache" / "latenet" / "wikidata"
 _COMMON_NAMES_PATH = Path(__file__).parent / "common_names.json"
 
 # Binomial scientific name pattern: "Genus species" (capitalized Latin genus + lowercase epithet)
@@ -117,45 +117,6 @@ def _run_wikistash_query(query: str) -> pd.DataFrame | None:
 # ---------------------------------------------------------------------------
 
 
-def _ensure_cache_dir() -> Path:
-    CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-    return CACHE_ROOT
-
-
-def _cache_key(query: str) -> str:
-    return hashlib.sha256(query.encode()).hexdigest()
-
-
-def _cache_path(query: str) -> Path:
-    return _ensure_cache_dir() / f"{_cache_key(query)}.parquet"
-
-
-def _manifest_path() -> Path:
-    return _ensure_cache_dir() / "manifest.json"
-
-
-def _load_manifest() -> dict:
-    mp = _manifest_path()
-    if mp.exists():
-        return json.loads(mp.read_text())
-    return {}
-
-
-def _save_manifest(manifest: dict) -> None:
-    _manifest_path().write_text(json.dumps(manifest, indent=2))
-
-
-def _update_manifest(query: str, row_count: int) -> None:
-    manifest = _load_manifest()
-    manifest[_cache_key(query)] = {
-        "query_hash": _cache_key(query),
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "row_count": row_count,
-        "query_preview": query[:200],
-    }
-    _save_manifest(manifest)
-
-
 _last_request_time: float = 0.0
 
 
@@ -168,35 +129,32 @@ def _rate_limit() -> None:
     _last_request_time = time.monotonic()
 
 
-def sparql_query(
-    query: str,
-    timeout: int = DEFAULT_TIMEOUT,
-    force_refresh: bool = False,
-) -> pd.DataFrame:
-    """Execute a SPARQL query against Wikidata and return results as a DataFrame.
+def _query_hash(query: str) -> str:
+    """Short hash for log identification."""
+    return hashlib.sha256(query.encode()).hexdigest()[:12]
 
-    Tries wikistash (local) first, falls back to remote SPARQL endpoint.
-    Results are cached as parquet files keyed by query hash.
-    """
-    cp = _cache_path(query)
-    if not force_refresh and cp.exists():
-        logger.info("Cache hit for query %s", _cache_key(query)[:12])
-        return pd.read_parquet(cp)
 
-    # Try wikistash first (local, fast, no rate limits — skip cache)
-    local_result = _run_wikistash_query(query)
-    if local_result is not None:
-        logger.info("wikistash returned %d rows for query %s", len(local_result), _cache_key(query)[:12])
-        return local_result
+def _parse_sparql_bindings(data: dict) -> pd.DataFrame:
+    """Parse SPARQL JSON results into a DataFrame."""
+    bindings = data.get("results", {}).get("bindings", [])
+    if not bindings:
+        return pd.DataFrame()
+    rows = []
+    for b in bindings:
+        row = {}
+        for key, val in b.items():
+            row[key] = val.get("value", "")
+        rows.append(row)
+    return pd.DataFrame(rows)
 
-    logger.debug("SPARQL query:\n%s", query)
-    logger.info("Cache miss for query %s, fetching from Wikidata...", _cache_key(query)[:12])
 
+def _fetch_remote(query: str, timeout: int = DEFAULT_TIMEOUT) -> pd.DataFrame:
+    """Fetch from remote Wikidata SPARQL endpoint with retries and rate limiting."""
+    logger.warning("REMOTE SPARQL query %s — wikistash unavailable", _query_hash(query))
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "application/sparql-results+json",
     }
-
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
         _rate_limit()
@@ -213,40 +171,37 @@ def sparql_query(
                 data = resp.json()
             except ValueError:
                 data = _json.loads(resp.text, strict=False)
-            break
+            return _parse_sparql_bindings(data)
         except (requests.RequestException, ValueError) as e:
             last_error = e
             wait = 2 ** attempt
             logger.warning(
-                "SPARQL request attempt %d/%d failed: %s. Retrying in %ds...",
+                "SPARQL attempt %d/%d failed: %s. Retrying in %ds...",
                 attempt, MAX_RETRIES, e, wait,
             )
             time.sleep(wait)
-    else:
-        raise RuntimeError(
-            f"SPARQL query failed after {MAX_RETRIES} attempts: {last_error}"
-        ) from last_error
+    raise RuntimeError(
+        f"SPARQL query failed after {MAX_RETRIES} attempts: {last_error}"
+    ) from last_error
 
-    # Parse SPARQL JSON results into DataFrame
-    bindings = data.get("results", {}).get("bindings", [])
-    if not bindings:
-        df = pd.DataFrame()
-    else:
-        rows = []
-        for b in bindings:
-            row = {}
-            for key, val in b.items():
-                row[key] = val.get("value", "")
-            rows.append(row)
-        df = pd.DataFrame(rows)
 
-    # Cache result
-    _ensure_cache_dir()
-    df.to_parquet(cp, index=False)
-    _update_manifest(query, len(df))
-    logger.info("Cached %d rows for query %s", len(df), _cache_key(query)[:12])
+def sparql_query(
+    query: str,
+    timeout: int = DEFAULT_TIMEOUT,
+    force_refresh: bool = False,
+) -> pd.DataFrame:
+    """Execute a SPARQL query against Wikidata and return results as a DataFrame.
 
-    return df
+    Tries wikistash (local) first, falls back to remote SPARQL endpoint.
+    The force_refresh parameter is accepted for API compatibility but ignored
+    (no parquet cache layer — wikistash is always fresh).
+    """
+    local_result = _run_wikistash_query(query)
+    if local_result is not None:
+        logger.info("wikistash: %d rows for query %s", len(local_result), _query_hash(query))
+        return local_result
+
+    return _fetch_remote(query, timeout)
 
 
 def sparql_query_paginated(
@@ -258,34 +213,26 @@ def sparql_query_paginated(
 ) -> pd.DataFrame:
     """Execute a paginated SPARQL query using {limit} and {offset} placeholders.
 
-    Concatenates all pages into a single DataFrame and caches the final result.
     When wikistash is available, runs the full query locally (no pagination needed).
+    Falls back to paginated remote SPARQL if wikistash is unavailable.
     """
-    # Cache the full result by hashing the template
-    cp = _cache_path(query_template)
-    if not force_refresh and cp.exists():
-        logger.info("Cache hit for paginated query %s", _cache_key(query_template)[:12])
-        return pd.read_parquet(cp)
-
-    # Try wikistash — run full query without pagination (local is fast enough, skip cache)
-    # Fill in a large LIMIT and OFFSET=0 to satisfy the template placeholders
+    # Try wikistash — run full query without pagination
     local_query = query_template.format(limit=1_000_000, offset=0)
     local_result = _run_wikistash_query(local_query)
     if local_result is not None:
-        logger.info("wikistash returned %d rows for paginated query %s",
-                     len(local_result), _cache_key(query_template)[:12])
+        logger.info("wikistash: %d rows for paginated query %s",
+                     len(local_result), _query_hash(query_template))
         return local_result
 
-    logger.info("Starting paginated query %s...", _cache_key(query_template)[:12])
-
+    # Remote fallback with pagination
+    logger.warning("REMOTE paginated SPARQL query %s — wikistash unavailable",
+                    _query_hash(query_template))
     all_dfs = []
     offset = 0
     page_num = 0
 
     while True:
         page_query = query_template.format(limit=page_size, offset=offset)
-
-        # Don't cache individual pages — only the full result
         headers = {
             "User-Agent": USER_AGENT,
             "Accept": "application/sparql-results+json",
@@ -314,11 +261,9 @@ def sparql_query_paginated(
                 )
                 time.sleep(wait)
         else:
-            # If we already have some data, log warning and stop pagination
-            # rather than failing the entire query
             if all_dfs:
                 logger.warning(
-                    "Page %d failed after %d attempts; stopping pagination with %d rows collected",
+                    "Page %d failed after %d attempts; stopping with %d rows",
                     page_num, MAX_RETRIES, sum(len(d) for d in all_dfs),
                 )
                 break
@@ -331,26 +276,17 @@ def sparql_query_paginated(
         if not bindings:
             break
 
-        rows = []
-        for b in bindings:
-            row = {}
-            for key, val in b.items():
-                row[key] = val.get("value", "")
-            rows.append(row)
-
-        page_df = pd.DataFrame(rows)
+        page_df = _parse_sparql_bindings(data)
         all_dfs.append(page_df)
         total_rows = sum(len(d) for d in all_dfs)
         page_num += 1
         logger.info("Fetched page %d (%d rows so far)...", page_num, total_rows)
 
-        if len(rows) < page_size:
+        if len(bindings) < page_size:
             break
-
         if max_pages is not None and page_num >= max_pages:
             logger.info("Reached max_pages=%d, stopping pagination", max_pages)
             break
-
         offset += page_size
 
     if all_dfs:
@@ -358,12 +294,7 @@ def sparql_query_paginated(
     else:
         df = pd.DataFrame()
 
-    # Cache the full result
-    _ensure_cache_dir()
-    df.to_parquet(cp, index=False)
-    _update_manifest(query_template, len(df))
     logger.info("Paginated query complete: %d total rows", len(df))
-
     return df
 
 
@@ -492,6 +423,13 @@ LIMIT {{limit}} OFFSET {{offset}}
 """
 
 
+def _normalize_name(name: str) -> str:
+    """Capitalize first letter if lowercase — likely Wikidata label bug."""
+    if not isinstance(name, str) or not name or name[0].isupper():
+        return name
+    return name[0].upper() + name[1:]
+
+
 def _extract_qid(uri: str) -> str:
     """Extract QID from a Wikidata entity URI."""
     if not isinstance(uri, str):
@@ -617,8 +555,8 @@ def load_organisms(
 
         chunk = pd.DataFrame()
         chunk["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
-        chunk["name"] = raw.get("itemLabel", pd.Series(dtype=str))
-        chunk["common_name"] = raw.get("itemLabel", pd.Series(dtype=str))  # use label as common name
+        chunk["name"] = raw.get("itemLabel", pd.Series(dtype=str)).apply(_normalize_name)
+        chunk["common_name"] = raw.get("itemLabel", pd.Series(dtype=str)).apply(_normalize_name)
         chunk["taxon_rank"] = rank_label
         chunk["parent_taxon_qid"] = raw.get("parentTaxon", pd.Series(dtype=str)).apply(_extract_qid)
         chunk["parent_taxon_label"] = raw.get("parentTaxonLabel", pd.Series(dtype=str))
@@ -854,7 +792,7 @@ def load_historical_events(
     # Normalize columns
     df = pd.DataFrame()
     df["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
-    df["name"] = raw.get("itemLabel", pd.Series(dtype=str))
+    df["name"] = raw.get("itemLabel", pd.Series(dtype=str)).apply(_normalize_name)
     df["description"] = raw.get("itemDescription", pd.Series(dtype=str))
     df["date"] = raw.get("date", pd.Series(dtype=str))
     df["event_type_uri"] = raw.get("eventType", pd.Series(dtype=str))
@@ -932,7 +870,7 @@ def load_notable_people(
 
         chunk = pd.DataFrame()
         chunk["qid"] = raw.get("item", pd.Series(dtype=str)).apply(_extract_qid)
-        chunk["name"] = raw.get("itemLabel", pd.Series(dtype=str))
+        chunk["name"] = raw.get("itemLabel", pd.Series(dtype=str)).apply(_normalize_name)
         chunk["birth_date"] = raw.get("birthDate", pd.Series(dtype=str))
         chunk["death_date"] = raw.get("deathDate", pd.Series(dtype=str))
         chunk["occupation"] = occ_label

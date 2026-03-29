@@ -283,9 +283,10 @@ class GeographyGenerator(BaseGenerator):
         for city_info in city_rows:
             city = city_info["city"]
             true_country = city_info["country"]
+            # Skip city/country name collisions (e.g. Djibouti in Djibouti)
+            if city.lower() == true_country.lower():
+                continue
             continent = self._country_continent.get(true_country)
-
-            # Pick negation countries at different difficulty levels
             swaps = self._pick_containment_swaps(true_country, continent, country_names)
             if not swaps:
                 continue

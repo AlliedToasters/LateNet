@@ -34,6 +34,20 @@ def _synset_is_attested(synset) -> bool:
     return _max_lemma_count(synset) > 0
 
 
+def _is_primary_sense(synset) -> bool:
+    """True if synset is the most common noun sense for its primary lemma.
+
+    Filters out obscure senses like time.n.05 (a clock reading) that produce
+    awkward statements because readers interpret the lemma as its primary sense.
+    """
+    from nltk.corpus import wordnet as wn
+    lemma_name = synset.lemmas()[0].name()
+    all_noun_senses = wn.synsets(lemma_name, pos="n")
+    if not all_noun_senses:
+        return True
+    return all_noun_senses[0].name() == synset.name()
+
+
 class WordNetGenerator(BaseGenerator):
     """Generate contrastive pairs from WordNet's noun hierarchy."""
 
@@ -92,6 +106,11 @@ class WordNetGenerator(BaseGenerator):
 
     def _pairs_from_relationship(self, rel: Relationship) -> Iterator[ContrastivePair]:
         """Yield all contrastive pairs for a single relationship."""
+        # Skip non-primary senses — they produce awkward statements because
+        # readers interpret the lemma as its most common meaning
+        if not _is_primary_sense(rel.source) or not _is_primary_sense(rel.target):
+            return
+
         # Pre-check source and target synset attestation for logging
         if not _synset_is_attested(rel.source) and not _synset_is_attested(rel.target):
             logger.debug(

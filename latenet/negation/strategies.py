@@ -300,6 +300,9 @@ def negate_statement(statement: str) -> str:
     s = re.sub(r"\bbelongs to\b", "does not belong to", s, count=1)
     if s != original:
         return s
+    s = re.sub(r"\bboth belong to\b", "do not both belong to", s, count=1)
+    if s != original:
+        return s
     s = re.sub(r"\bbelong to\b", "do not belong to", s, count=1)
     if s != original:
         return s

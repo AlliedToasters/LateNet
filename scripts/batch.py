@@ -181,14 +181,14 @@ def _validate_from_ledger(args: argparse.Namespace, ledger_dir: Path) -> None:
 
     # Sample per stratum
     n = args.validate_per_stratum or 5
-    pair_meta = unvalidated.groupby("pair_id").first()[["generator", "difficulty"]].reset_index()
+    pair_meta = unvalidated.groupby("pair_id").first()[["generator", "relation_type"]].reset_index()
     sampled_ids: list[str] = []
-    for (gen, diff), group in pair_meta.groupby(["generator", "difficulty"]):
+    for (gen, rel), group in pair_meta.groupby(["generator", "relation_type"]):
         selected = group.sample(n=min(n, len(group)), random_state=args.seed)
         sampled_ids.extend(selected["pair_id"].tolist())
         logger.info(
             "  validate sample %s/%s: %d of %d unvalidated pairs",
-            gen, diff or "(none)", len(selected), len(group),
+            gen, rel or "(none)", len(selected), len(group),
         )
 
     candidates_df = unvalidated[unvalidated["pair_id"].isin(sampled_ids)].copy()
@@ -367,14 +367,14 @@ def main():
     if args.validate_per_stratum is not None and not args.skip_validation:
         n = args.validate_per_stratum
         # Sample N pair_ids per (generator, difficulty) stratum
-        pair_meta = candidates_df.groupby("pair_id").first()[["generator", "difficulty"]].reset_index()
+        pair_meta = candidates_df.groupby("pair_id").first()[["generator", "relation_type"]].reset_index()
         sampled_ids: list[str] = []
-        for (gen, diff), group in pair_meta.groupby(["generator", "difficulty"]):
+        for (gen, rel), group in pair_meta.groupby(["generator", "relation_type"]):
             selected = group.sample(n=min(n, len(group)), random_state=args.seed)
             sampled_ids.extend(selected["pair_id"].tolist())
             logger.info(
                 "  validate sample %s/%s: %d of %d pairs",
-                gen, diff or "(none)", len(selected), len(group),
+                gen, rel or "(none)", len(selected), len(group),
             )
         # Keep the unsampled rows for the ledger (unvalidated)
         unvalidated_rows = candidates_df[~candidates_df["pair_id"].isin(sampled_ids)].copy()

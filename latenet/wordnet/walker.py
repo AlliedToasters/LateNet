@@ -46,6 +46,32 @@ def _max_lemma_count(synset) -> int:
     return max((lemma.count() for lemma in synset.lemmas()), default=0)
 
 
+_CONCRETE_ROOTS: frozenset[str] | None = None
+
+
+def _concrete_synset_names() -> frozenset[str]:
+    """Return names of all synsets under physical_entity.n.01.
+
+    Restricting to this subtree avoids abstract nouns (time, group, relation)
+    whose hypernym chains produce awkward IS-A statements.
+    """
+    global _CONCRETE_ROOTS
+    if _CONCRETE_ROOTS is not None:
+        return _CONCRETE_ROOTS
+
+    root = wn.synset("physical_entity.n.01")
+    names: set[str] = set()
+    queue = [root]
+    while queue:
+        s = queue.pop()
+        if s.name() in names:
+            continue
+        names.add(s.name())
+        queue.extend(s.hyponyms())
+    _CONCRETE_ROOTS = frozenset(names)
+    return _CONCRETE_ROOTS
+
+
 @dataclass
 class WalkerConfig:
     seed: int = 42
@@ -56,6 +82,7 @@ class WalkerConfig:
     )
     pos: str = "n"
     frequency_weighted: bool = True
+    concrete_only: bool = True
 
 
 class WordNetWalker:
@@ -73,6 +100,10 @@ class WordNetWalker:
         """
         synsets = list(wn.all_synsets(self.config.pos))
         synsets = [s for s in synsets if s.min_depth() <= self.config.max_depth]
+
+        if self.config.concrete_only:
+            concrete = _concrete_synset_names()
+            synsets = [s for s in synsets if s.name() in concrete]
 
         if self.config.frequency_weighted:
             # Sort synsets by lemma frequency (descending) with random
