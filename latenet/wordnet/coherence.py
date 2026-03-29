@@ -225,17 +225,36 @@ class CoherenceScorer:
         # Sort tokens by logit descending
         sorted_tokens = sorted(logit_lookup.items(), key=lambda x: x[1], reverse=True)
 
-        # Build hypernym closure for falseness check
-        hyp_closure: set[str] = set()
+        # Build exclusion set: hypernym closure (ancestors) + hyponym closure
+        # (descendants). Bidirectional check prevents near-misses like
+        # "county is a type of region" (region is ancestor) and
+        # "pond is a type of lake" (lake is ancestor — pond is hyponym of lake).
+        exclusion_set: set[str] = set()
+        # Upward: all ancestors
         queue = [source_synset]
         while queue:
             s = queue.pop()
-            if s.name() in hyp_closure:
+            if s.name() in exclusion_set:
                 continue
-            hyp_closure.add(s.name())
+            exclusion_set.add(s.name())
             queue.extend(s.hypernyms())
+        # Downward: immediate hyponyms (1 level — full closure too expensive)
+        for child in source_synset.hyponyms():
+            exclusion_set.add(child.name())
 
         source_lemmas = {l.name().lower() for l in source_synset.lemmas()}
+
+        # Collect lemmas from the hypernym chain for substring near-miss check.
+        # Catches "chlorine is a chemical" where chemical.n.01 isn't in the
+        # chain but chemical_element.n.01 IS — "chemical" is a substring.
+        chain_lemmas: set[str] = set()
+        for name in exclusion_set:
+            try:
+                syn_obj = wn.synset(name)
+                for lem in syn_obj.lemmas():
+                    chain_lemmas.add(lem.name().lower().replace("_", " "))
+            except Exception:
+                pass
 
         scored: list[tuple[Synset, float]] = []
         seen_synsets: set[str] = set()
@@ -256,13 +275,20 @@ class CoherenceScorer:
                 continue
             seen_synsets.add(syn.name())
 
-            # Skip if ANY sense of this word is in the hypernym chain.
+            # Skip if ANY sense of this word is in the exclusion set.
             # Prevents polysemy leaks: "canine" maps to tooth (n.01) but
             # readers interpret it as the animal (n.02), which IS true.
-            if any(s.name() in hyp_closure for s in synsets):
+            if any(s.name() in exclusion_set for s in synsets):
                 continue
-            # Skip TRUE candidates (primary sense in hypernym chain)
-            if syn.name() in hyp_closure:
+            # Skip TRUE candidates (in hypernym/hyponym chain)
+            if syn.name() in exclusion_set:
+                continue
+            # Skip taxonomically close candidates that humans perceive as
+            # true even if not in the exact hypernym chain. WuP ≥ 0.7
+            # catches cases like "chlorine is a chemical" (wup=0.57 is
+            # fine, but county/region at 0.91 is not).
+            wup = source_synset.wup_similarity(syn)
+            if wup is not None and wup >= 0.7:
                 continue
             # Skip blocklisted generic classifiers
             if syn.name() in GENERIC_SYNSET_BLOCKLIST:
@@ -272,6 +298,16 @@ class CoherenceScorer:
                 continue
             # Skip non-physical-entity synsets (abstract nonsense)
             if not _is_physical_entity(syn):
+                continue
+            # Skip lemma-level near-misses: if candidate lemma is a
+            # substring of any chain lemma (or vice versa), it's too close.
+            # "chemical" ⊂ "chemical element" → skip.
+            cand_lemma = syn.lemma_names()[0].lower().replace("_", " ")
+            if any(
+                (cand_lemma in cl and len(cand_lemma) >= 4) or
+                (cl in cand_lemma and len(cl) >= 4)
+                for cl in chain_lemmas
+            ):
                 continue
 
             scored.append((syn, logit_val))
