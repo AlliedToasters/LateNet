@@ -29,6 +29,7 @@ DEFAULT_TOP_K = 10000
 # Generic classifier synsets that get high logits but make bad false categories.
 # "A bridge is a type" is a natural completion but a nonsensical statement.
 GENERIC_SYNSET_BLOCKLIST = frozenset({
+    # Generic classifier words
     "type.n.01", "type.n.06",
     "kind.n.01",
     "form.n.01", "form.n.03",
@@ -39,6 +40,16 @@ GENERIC_SYNSET_BLOCKLIST = frozenset({
     "set.n.01", "set.n.02",
     "system.n.01",
     "whole.n.01",
+    # Abstract/figurative person subtypes that produce awkward pairings
+    "personification.n.01", "personification.n.02",
+    "personage.n.01",
+})
+
+# Culturally sensitive source lemmas that produce uncomfortable pairings
+# regardless of the false candidate chosen.
+SENSITIVE_SOURCE_LEMMAS = frozenset({
+    "jew", "muslim", "christian", "hindu", "buddhist",
+    "black", "white", "arab", "asian",
 })
 
 
@@ -153,6 +164,9 @@ class CoherenceScorer:
             Candidates outside top-k get a floor score.
             Generic blocklisted synsets are excluded.
         """
+        if source_word.lower() in SENSITIVE_SOURCE_LEMMAS:
+            return []
+
         self._ensure_initialized()
         logit_lookup = self._get_logits(source_word)
 
@@ -184,6 +198,39 @@ class CoherenceScorer:
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored
 
+    def source_is_coherent(
+        self,
+        source_word: str,
+        hypernym_synsets: list[Synset],
+        top_n: int = 20,
+    ) -> bool:
+        """Check if the model associates source_word with its WordNet hypernyms.
+
+        Returns True if any hypernym's first token appears in the model's
+        top_n completions for "True or false? A {source_word} is a ___".
+        If the model doesn't associate the word with this taxonomic sense,
+        the source synset is being used in an obscure meaning and will
+        produce awkward statements.
+        """
+        if not hypernym_synsets:
+            return True  # Can't check — allow
+
+        self._ensure_initialized()
+        logit_lookup = self._get_logits(source_word)
+
+        # Get top_n token IDs by logit
+        sorted_tids = sorted(logit_lookup, key=lambda t: logit_lookup[t], reverse=True)[:top_n]
+        top_set = set(sorted_tids)
+
+        for hyp in hypernym_synsets:
+            for lemma_obj in hyp.lemmas():
+                lemma = lemma_obj.name().replace("_", " ")
+                tids = self._tokenizer.encode(f" {lemma}", add_special_tokens=False)
+                if tids[0] in top_set:
+                    return True
+
+        return False
+
     def close(self) -> None:
         """Release resources."""
         self._extractor = None
@@ -194,12 +241,18 @@ class CoherenceScorer:
 def softmax_sample(
     scored: list[tuple[Synset, float]],
     rng: random.Random,
+    temperature: float = 0.5,
 ) -> Synset | None:
-    """Sample a synset from scored candidates using softmax over logits."""
+    """Sample a synset from scored candidates using softmax over logits.
+
+    Temperature < 1.0 sharpens the distribution toward high-logit candidates.
+    Temperature = 1.0 is standard softmax. Temperature > 1.0 flattens.
+    Default 0.5 concentrates on plausible candidates without hard cutoffs.
+    """
     if not scored:
         return None
     max_logit = max(l for _, l in scored)
-    weights = [math.exp(l - max_logit) for _, l in scored]
+    weights = [math.exp((l - max_logit) / temperature) for _, l in scored]
     return rng.choices([s for s, _ in scored], weights=weights, k=1)[0]
 
 

@@ -126,6 +126,14 @@ class WordNetGenerator(BaseGenerator):
             )
 
         templates = get_templates(rel.rel_type)
+        # When coherence scoring is active, prefer explicit taxonomic templates
+        # ("is a type of", "is a kind of") over bare copula ("is a").
+        # Bare copula has 50% awkward rate vs 9% for "type of" framing.
+        if self._coherence_scorer is not None:
+            _TAXONOMIC_TEMPLATES = {"hyp_02"}
+            taxonomic = [t for t in templates if t.id in _TAXONOMIC_TEMPLATES]
+            if taxonomic:
+                templates = taxonomic
         for template in templates:
             slots, synset_map = slot_values_for_relationship(template, rel)
             true_statement = render(template, slots, synset_map=synset_map)
