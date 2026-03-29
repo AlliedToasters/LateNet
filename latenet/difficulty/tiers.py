@@ -82,19 +82,36 @@ def _cousins_of(synset: Synset) -> list[Synset]:
 _MAX_CATEGORY_DEPTH = 5
 
 
-def _is_category_level(synset: Synset) -> bool:
-    """True if synset is a general category suitable for "X is a Y" templates.
+_PHYSICAL_ENTITY_NAMES: frozenset[str] | None = None
 
-    Requires: attested in corpus, has hyponyms, and shallow enough in the
-    taxonomy to be a plausible category. Filters out specific nouns like
-    'boy.n.01' (depth=5), 'kitchen.n.01' (depth=8), 'shackle.n.01' (depth=8)
-    in favor of general categories like 'substance.n.01' (depth=3),
-    'quality.n.01' (depth=3), 'artifact.n.01' (depth=4).
+
+def _is_physical_entity(synset: Synset) -> bool:
+    """True if synset is a descendant of physical_entity.n.01."""
+    global _PHYSICAL_ENTITY_NAMES
+    if _PHYSICAL_ENTITY_NAMES is None:
+        root = wn.synset("physical_entity.n.01")
+        names: set[str] = set()
+        queue = [root]
+        while queue:
+            s = queue.pop()
+            if s.name() in names:
+                continue
+            names.add(s.name())
+            queue.extend(s.hyponyms())
+        _PHYSICAL_ENTITY_NAMES = frozenset(names)
+    return synset.name() in _PHYSICAL_ENTITY_NAMES
+
+
+def _is_category_level(synset: Synset) -> bool:
+    """True if synset is a concrete, general category for "X is a Y" templates.
+
+    Requires: attested, has hyponyms, not too deep, and under physical_entity.
     """
     return (
         _max_lemma_count(synset) > 0
         and len(synset.hyponyms()) >= 2
         and synset.min_depth() <= _MAX_CATEGORY_DEPTH
+        and _is_physical_entity(synset)
     )
 
 
