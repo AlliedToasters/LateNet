@@ -198,6 +198,91 @@ class CoherenceScorer:
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored
 
+    def generate_false_candidates(
+        self,
+        source_word: str,
+        source_synset: Synset,
+        decode_top_n: int = 200,
+    ) -> list[tuple[Synset, float]]:
+        """Generate false candidate synsets from the model's top completions.
+
+        Inverted pipeline: model generates plausible completions for
+        "True or false? A {word} is a ___", then WordNet validates
+        which ones are genuinely false (not in source's hypernym chain).
+
+        Returns (synset, logit) pairs sorted by logit descending.
+        Only includes primary-sense noun synsets not in the hypernym closure.
+        """
+        from nltk.corpus import wordnet as wn
+        from latenet.difficulty.tiers import _is_physical_entity
+
+        if source_word.lower() in SENSITIVE_SOURCE_LEMMAS:
+            return []
+
+        self._ensure_initialized()
+        logit_lookup = self._get_logits(source_word)
+
+        # Sort tokens by logit descending
+        sorted_tokens = sorted(logit_lookup.items(), key=lambda x: x[1], reverse=True)
+
+        # Build hypernym closure for falseness check
+        hyp_closure: set[str] = set()
+        queue = [source_synset]
+        while queue:
+            s = queue.pop()
+            if s.name() in hyp_closure:
+                continue
+            hyp_closure.add(s.name())
+            queue.extend(s.hypernyms())
+
+        source_lemmas = {l.name().lower() for l in source_synset.lemmas()}
+
+        scored: list[tuple[Synset, float]] = []
+        seen_synsets: set[str] = set()
+
+        for tid, logit_val in sorted_tokens[:decode_top_n]:
+            decoded = self._tokenizer.decode([tid]).strip()
+            word = decoded.strip(".,;:!?\"'()[]{}").lower()
+            if not word or len(word) < 2:
+                continue
+
+            # Only take the primary (first) noun sense — avoids obscure-sense problem
+            synsets = wn.synsets(word, pos="n")
+            if not synsets:
+                continue
+            syn = synsets[0]
+
+            if syn.name() in seen_synsets:
+                continue
+            seen_synsets.add(syn.name())
+
+            # Skip if ANY sense of this word is in the hypernym chain.
+            # Prevents polysemy leaks: "canine" maps to tooth (n.01) but
+            # readers interpret it as the animal (n.02), which IS true.
+            if any(s.name() in hyp_closure for s in synsets):
+                continue
+            # Skip TRUE candidates (primary sense in hypernym chain)
+            if syn.name() in hyp_closure:
+                continue
+            # Skip blocklisted generic classifiers
+            if syn.name() in GENERIC_SYNSET_BLOCKLIST:
+                continue
+            # Skip lemma overlap with source (tautologies)
+            if source_lemmas & {l.name().lower() for l in syn.lemmas()}:
+                continue
+            # Skip non-physical-entity synsets (abstract nonsense)
+            if not _is_physical_entity(syn):
+                continue
+
+            scored.append((syn, logit_val))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        logger.debug(
+            "Inverted pipeline for '%s': %d usable false candidates from top-%d tokens",
+            source_word, len(scored), decode_top_n,
+        )
+        return scored
+
     def source_is_coherent(
         self,
         source_word: str,

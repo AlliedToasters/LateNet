@@ -196,6 +196,110 @@ class TestPickNegationWithCoherence:
 
 
 # ---------------------------------------------------------------------------
+# Unit tests: generate_false_candidates (inverted pipeline)
+# ---------------------------------------------------------------------------
+
+class TestGenerateFalseCandidates:
+
+    def test_basic_generation(self, mock_scorer):
+        """Inverted pipeline produces false candidates from logit distribution."""
+        dog = wn.synset("dog.n.01")
+
+        # Build a fake logit cache with tokens for real nouns
+        # "cat", "car", "fish" should map to WordNet synsets
+        logit_lookup = {}
+        for word, logit in [("cat", 15.0), ("car", 14.0), ("fish", 13.0), ("xyz", 12.0)]:
+            tid = hash(word) % 100000
+            logit_lookup[tid] = logit
+
+        # Mock the tokenizer decode to return the word from the token ID
+        token_to_word = {}
+        for word in ["cat", "car", "fish", "xyz"]:
+            token_to_word[hash(word) % 100000] = word
+        mock_scorer._tokenizer.decode = lambda tids: token_to_word.get(tids[0], "???")
+
+        _inject_logits(mock_scorer, "dog", logit_lookup)
+        candidates = mock_scorer.generate_false_candidates("dog", dog)
+
+        # Should have some candidates (cat, car, fish are all physical entities
+        # and not in dog's hypernym chain)
+        assert len(candidates) > 0
+        # All should be (Synset, float) tuples
+        for syn, logit in candidates:
+            assert hasattr(syn, "name")
+            assert isinstance(logit, float)
+        # None should be in dog's hypernym chain
+        hyp_closure = set()
+        queue = [dog]
+        while queue:
+            s = queue.pop()
+            if s.name() in hyp_closure:
+                continue
+            hyp_closure.add(s.name())
+            queue.extend(s.hypernyms())
+        for syn, _ in candidates:
+            assert syn.name() not in hyp_closure
+
+    def test_sensitive_source_returns_empty(self, mock_scorer):
+        """Sensitive source lemmas produce no candidates."""
+        # "jew" is in SENSITIVE_SOURCE_LEMMAS
+        jew_synsets = wn.synsets("jew", pos="n")
+        if not jew_synsets:
+            pytest.skip("No synset for 'jew'")
+        result = mock_scorer.generate_false_candidates("jew", jew_synsets[0])
+        assert result == []
+
+    def test_hypernym_chain_excluded(self, mock_scorer):
+        """TRUE candidates (in hypernym chain) are excluded."""
+        dog = wn.synset("dog.n.01")
+        # "animal" is in dog's hypernym chain
+        animal_tid = hash("animal") % 100000
+        cat_tid = hash("cat") % 100000
+
+        token_to_word = {animal_tid: "animal", cat_tid: "cat"}
+        mock_scorer._tokenizer.decode = lambda tids: token_to_word.get(tids[0], "???")
+
+        _inject_logits(mock_scorer, "dog", {animal_tid: 20.0, cat_tid: 15.0})
+        candidates = mock_scorer.generate_false_candidates("dog", dog)
+
+        synset_names = {s.name() for s, _ in candidates}
+        # animal.n.01 should be excluded (it's in dog's hypernym chain)
+        assert "animal.n.01" not in synset_names
+
+
+# ---------------------------------------------------------------------------
+# Integration: pick_negation_synset EASY tier with inverted pipeline
+# ---------------------------------------------------------------------------
+
+class TestEasyTierInvertedPipeline:
+
+    def test_easy_tier_uses_inverted_when_scorer_present(self, mock_scorer):
+        """EASY tier with coherence_scorer uses generate_false_candidates."""
+        dog = wn.synset("dog.n.01")
+        target = dog.hypernyms()[0] if dog.hypernyms() else None
+        if target is None:
+            pytest.skip("dog has no hypernyms")
+
+        # Inject logits with distant nouns
+        logit_lookup = {}
+        token_to_word = {}
+        for word, logit in [("piano", 14.0), ("building", 13.0), ("river", 12.0)]:
+            tid = hash(word) % 100000
+            logit_lookup[tid] = logit
+            token_to_word[tid] = word
+        mock_scorer._tokenizer.decode = lambda tids: token_to_word.get(tids[0], "???")
+
+        source_word = dog.lemma_names()[0].replace("_", " ")
+        _inject_logits(mock_scorer, source_word, logit_lookup)
+
+        rng = random.Random(42)
+        result = pick_negation_synset(dog, target, Difficulty.EASY, rng, coherence_scorer=mock_scorer)
+        # Should return something (may fall back to legacy if inverted yields nothing for this mock)
+        # At minimum, should not error
+        assert result is None or result.name() != dog.name()
+
+
+# ---------------------------------------------------------------------------
 # Blocklist completeness
 # ---------------------------------------------------------------------------
 

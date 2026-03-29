@@ -225,10 +225,26 @@ def pick_negation_synset(
     elif difficulty == Difficulty.EASY:
         if coherence_scorer is None:
             return _distant_synset(target, rng, source=source)
-        # Build distant pool manually so we can route through scorer
-        pool = _distant_pool(target, source)
-        if not pool:
-            return _distant_synset(target, rng, source=source)
+        # Inverted pipeline: model generates candidates, WordNet validates
+        # falseness. Produces inherently coherent false statements.
+        from latenet.wordnet.coherence import softmax_sample
+        from latenet.wordnet.distance import semantic_distance as _sem_dist
+
+        source_word = source.lemma_names()[0].replace("_", " ")
+        all_candidates = coherence_scorer.generate_false_candidates(
+            source_word, source,
+        )
+        # Filter to easy-tier distance (>5 hops from target)
+        easy_candidates = [
+            (syn, logit) for syn, logit in all_candidates
+            if _sem_dist(target, syn) > 5
+        ]
+        if easy_candidates:
+            return softmax_sample(easy_candidates, rng)
+        # Fall back to any inverted candidate, then legacy distant
+        if all_candidates:
+            return softmax_sample(all_candidates, rng)
+        return _distant_synset(target, rng, source=source)
     else:
         return None
 
