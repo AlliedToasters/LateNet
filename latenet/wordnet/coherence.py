@@ -52,6 +52,13 @@ SENSITIVE_SOURCE_LEMMAS = frozenset({
     "black", "white", "arab", "asian",
 })
 
+# Target lemmas that are offensive or misleading regardless of source.
+# "homo" = Homo sapiens in WordNet but reads as a slur.
+SENSITIVE_TARGET_BLOCKLIST = frozenset({
+    "homo", "homosexual", "negro", "negroid",
+    "savage", "primitive", "half-breed", "mulatto",
+})
+
 
 def _base_prompt(word: str) -> str:
     """Plain text prompt for base model completion."""
@@ -298,6 +305,9 @@ class CoherenceScorer:
                 continue
             # Skip non-physical-entity synsets (abstract nonsense)
             if not _is_physical_entity(syn):
+                continue
+            # Skip offensive/misleading target lemmas
+            if word in SENSITIVE_TARGET_BLOCKLIST:
                 continue
             # Skip lemma-level near-misses: if candidate lemma is a
             # substring of any chain lemma (or vice versa), it's too close.
