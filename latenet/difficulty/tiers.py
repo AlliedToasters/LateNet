@@ -12,6 +12,7 @@ from nltk.corpus.reader.wordnet import Synset
 from latenet.types import Difficulty
 
 MAX_SIBLING_POOL = 20
+MIN_WUP_SIMILARITY = 0.55
 
 
 def _max_lemma_count(synset: Synset) -> int:
@@ -115,26 +116,41 @@ def _is_category_level(synset: Synset) -> bool:
     )
 
 
-def _distant_synset(synset: Synset, rng: random.Random) -> Synset | None:
+def _distant_synset(
+    synset: Synset, rng: random.Random, source: Synset | None = None,
+) -> Synset | None:
     """Pick a noun synset from a different root hypernym tree, weighted by frequency.
 
-    Only considers category-level synsets (have hyponyms, attested in corpus) to
-    avoid nonsensical false statements like 'Day is a Sioux'.
+    Only considers category-level synsets (have hyponyms, attested in corpus,
+    under physical_entity) to avoid nonsensical false statements.
     """
+    # Collect lemma names to exclude (prevents tautologies)
+    exclude_lemmas: set[str] = set()
+    if source is not None:
+        exclude_lemmas = {l.name().lower() for l in source.lemmas()}
+    exclude_lemmas |= {l.name().lower() for l in synset.lemmas()}
+
+    def _valid(s: Synset) -> bool:
+        return (
+            _is_category_level(s)
+            and s.name() != synset.name()
+            and not exclude_lemmas & {l.name().lower() for l in s.lemmas()}
+        )
+
     source_roots = {r.name() for r in synset.root_hypernyms()}
     by_root = _synsets_by_root()
 
     other_roots = [k for k in by_root if k not in source_roots]
     if not other_roots:
-        all_synsets = [s for ss in by_root.values() for s in ss
-                       if s.name() != synset.name() and _is_category_level(s)]
-        return _frequency_weighted_choice(all_synsets, rng) if all_synsets else None
+        pool = [s for ss in by_root.values() for s in ss if _valid(s)]
+        return _frequency_weighted_choice(pool, rng) if pool else None
 
     root = rng.choice(other_roots)
-    pool = [s for s in by_root[root] if _is_category_level(s)]
+    pool = [s for s in by_root[root] if _valid(s)]
     if not pool:
-        # Fallback: relax to just attested synsets
-        pool = [s for s in by_root[root] if _max_lemma_count(s) > 0]
+        pool = [s for s in by_root[root]
+                if _max_lemma_count(s) > 0 and s.name() != synset.name()
+                and not exclude_lemmas & {l.name().lower() for l in s.lemmas()}]
     return _frequency_weighted_choice(pool, rng) if pool else None
 
 
@@ -160,12 +176,20 @@ def pick_negation_synset(
     elif difficulty == Difficulty.MEDIUM:
         pool = _no_overlap(_cousins_of(target))
     elif difficulty == Difficulty.EASY:
-        return _distant_synset(target, rng)
+        return _distant_synset(target, rng, source=source)
     else:
         return None
 
     if not pool:
         return None
+
+    # Wu-Palmer coherence: keep only replacements that are taxonomically
+    # close enough to the source that "Source is a Replacement" sounds
+    # plausible (even if false). Filters out awkward swaps like
+    # "Person is a cell" (wup=0.40) while keeping "Man is a female" (wup=0.71).
+    coherent = [s for s in pool if (source.wup_similarity(s) or 0) >= MIN_WUP_SIMILARITY]
+    if coherent:
+        pool = coherent
 
     if len(pool) > MAX_SIBLING_POOL:
         pool = rng.sample(pool, MAX_SIBLING_POOL)
