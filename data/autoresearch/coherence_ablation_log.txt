@@ -1,0 +1,67 @@
+# NDIF Coherence Scoring — Autoresearch Ablation Log
+# Date: 2026-03-29
+# Model: Llama 3.1 70B base via NDIF (logit_top_k=10,000)
+# Metric: Sonnet awkward rate on affirmative FALSE statements
+# Baseline: 53.3% (from negation_ablation_report.md, pre-coherence)
+
+## Iteration History
+
+| Version | Changes | FALSE Awkward | Delta | Notes |
+|---------|---------|---------------|-------|-------|
+| baseline | No coherence scoring | 53.3% | — | From negation ablation report |
+| v1 (spike) | — | — | — | Feasibility only, no validation |
+| v2 | Coherence on sibling+cousin, NOT distant | 40.7% (11/30) | -12.6pp | distant_swap 93% awkward |
+| v3 | + distant_swap through scorer | 58.1% (18/32) | +4.8pp | REGRESSION — top_fraction=0.5 filter was wrong |
+| v4 | Revert filter, restrict to hyp_02/04/05 + temp=0.5 | 44.4% (12/28) | -8.9pp | hyp_02=29%, hyp_04=67% |
+| v5 | hyp_02 only + blocklist expansion + sensitive filter | 42.9% (9/21) | -10.4pp | TRUE awkward 19% (word sense) |
+
+## Best result: v2 at 40.7% (-12.6pp)
+
+v2 was the cleanest improvement: coherence scoring on sibling+cousin swaps
+with the full distant_swap pipeline unmodified. The distant_swap scoring in
+later versions introduced noise because the distant pool is huge and the
+scorer can't meaningfully differentiate across root-tree boundaries.
+
+## What worked
+1. **NDIF logit-weighted sampling** — directly addresses semantic incoherence
+   by weighting candidates the model considers plausible as "X is a ___"
+2. **Template selection** — hyp_02 ("is a type of") at 29% vs hyp_01 ("is a") at 50%
+3. **Generic synset blocklist** — prevents "bridge is a type" etc.
+4. **Sensitive lemma filter** — prevents culturally uncomfortable pairings
+
+## What didn't work
+1. **Source coherence pre-filter** (iter 1) — top_n=20 filtered nothing (0 skips)
+   and cost 1100+ NDIF calls. Too expensive, too permissive.
+2. **Top-fraction hard cutoff** (iter 3) — reduced diversity and concentrated
+   sampling on a smaller set that included awkward candidates too
+3. **Distant_swap scoring** — the distant pool is from different root trees,
+   so the logit signal is noisy. The category-level filter already handles
+   the structural quality; adding logit scoring didn't help much.
+
+## Remaining awkwardness: word-sense layer (not coherence)
+The ~40% remaining awkward FALSE statements break down as:
+- **Obscure source senses**: "consequence" (phenomenon), "side" (region),
+  "surface" (artifact), "spirit" (supernatural being) — WordNet senses
+  that don't match colloquial meaning
+- **Abstract category siblings**: "person is a cell" (biological cell is a
+  sibling of person under organism), "location is matter" (sibling under object)
+- **reverse_relation leaking sensitive content**: "A person is a type of Jew"
+
+## Recommended next steps
+1. **Abstract category depth filter**: source synsets at depth ≤ 3 in WordNet
+   (person, location, body, water) produce the worst statements because they're
+   too broad — their siblings span unrelated domains. Skip source synsets
+   where min_depth ≤ 3 for sibling/cousin swaps.
+2. **Synset concreteness score**: use the logit distribution entropy as a
+   proxy — if the model's completions for "A {word} is a ___" are very spread
+   out (high entropy), the word is too abstract for "X is a Y" framing.
+3. **Wire reverse_relation through sensitive filter**: check both source AND
+   target lemmas against the sensitive blocklist.
+
+## Graveyard inventory
+- data/graveyard/ledger_wordnet_pre_coherence.parquet — 26 rows (test batch, unvalidated)
+- data/graveyard/ledger_wordnet_coherence_v1.parquet — 128 rows (v2, distant untouched)
+- data/graveyard/ledger_wordnet_coherence_v2.parquet — 120 rows (v2 rerun w/ distant scored)
+- data/graveyard/ledger_wordnet_coherence_v3.parquet — 128 rows (top-50% filter regression)
+- data/graveyard/ledger_wordnet_coherence_v4.parquet — 112 rows (hyp_02+04+05, temp=0.5)
+- data/graveyard/ledger_wordnet_coherence_v5.parquet — 84 rows (hyp_02 only + blocklists)
