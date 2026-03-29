@@ -12,7 +12,7 @@ from nltk.corpus.reader.wordnet import Synset
 from latenet.types import Difficulty
 
 MAX_SIBLING_POOL = 20
-MIN_WUP_SIMILARITY = 0.55
+MIN_WUP_SIMILARITY = 0.6
 
 
 def _max_lemma_count(synset: Synset) -> int:
@@ -20,12 +20,20 @@ def _max_lemma_count(synset: Synset) -> int:
     return max((lemma.count() for lemma in synset.lemmas()), default=0)
 
 
-def _frequency_weighted_choice(pool: list[Synset], rng: random.Random) -> Synset:
+def _frequency_weighted_choice(
+    pool: list[Synset], rng: random.Random, flatten: bool = False,
+) -> Synset:
     """Pick from pool with probability proportional to lemma frequency.
 
-    Uses floor=1 so zero-count synsets still have a chance.
+    When flatten=True, uses log(count+1) to reduce dominance of very common
+    words (e.g., "person") in the distant_swap pool. Default uses floor=1
+    so zero-count synsets still have a chance.
     """
-    weights = [max(_max_lemma_count(s), 1) for s in pool]
+    if flatten:
+        import math
+        weights = [math.log(_max_lemma_count(s) + 2) for s in pool]
+    else:
+        weights = [max(_max_lemma_count(s), 1) for s in pool]
     return rng.choices(pool, weights=weights, k=1)[0]
 
 
@@ -143,7 +151,7 @@ def _distant_synset(
     other_roots = [k for k in by_root if k not in source_roots]
     if not other_roots:
         pool = [s for ss in by_root.values() for s in ss if _valid(s)]
-        return _frequency_weighted_choice(pool, rng) if pool else None
+        return _frequency_weighted_choice(pool, rng, flatten=True) if pool else None
 
     root = rng.choice(other_roots)
     pool = [s for s in by_root[root] if _valid(s)]
@@ -151,7 +159,7 @@ def _distant_synset(
         pool = [s for s in by_root[root]
                 if _max_lemma_count(s) > 0 and s.name() != synset.name()
                 and not exclude_lemmas & {l.name().lower() for l in s.lemmas()}]
-    return _frequency_weighted_choice(pool, rng) if pool else None
+    return _frequency_weighted_choice(pool, rng, flatten=True) if pool else None
 
 
 def pick_negation_synset(
